@@ -9,15 +9,15 @@ DATA_CONFIG = {
     'symbol': 'BTC/USDT',
     'timeframe': '1h',
     'exchange': 'binance',
-    'since': '2020-01-01T00:00:00Z', # Fetch data from the beginning of 2020
-    'limit': 100000, # Set a high limit to ensure all data since 'since' is fetched
+    'since': '2020-01-01T00:00:00Z', # 从2020年开始获取数据
+    'limit': 100000, # 设置一个较高的上限以确保获取'since'之后的所有数据
     'cache_path': 'cache/v2_ohlcv_{symbol}_{timeframe}.pkl'
 }
 
 
 # ----------------- Feature Engineering Config -----------------
 FEATURE_CONFIG = {
-    # Indicator periods
+    # 指标周期
     'macd_fast': 12,
     'macd_slow': 26,
     'macd_signal': 9,
@@ -61,7 +61,7 @@ MODEL_CONFIG = {
 # ----------------- Optuna Configuration -----------------
 OPTUNA_CONFIG = {
     "n_trials": 50,
-    "timeout": None,  # In seconds
+    "timeout": None,  # 单位：秒
     "storage_name": "optuna_studies.db",
     "study_name": "btc_prediction_study"
 }
@@ -100,10 +100,10 @@ LOG_FILE = os.path.join(PATHS['logs'], 'btc_predictor_run.log')
 
 # ----------------- GPU Config -----------------
 GPU_CONFIG = {
-    'benchmark': True, # Set to True if input sizes don't vary, for performance
-    'num_workers': 4,  # Adjust based on your machine's core count
-    'pin_memory': True, # Helps speed up data transfer to GPU
-    'non_blocking': True # Use with pin_memory for asynchronous GPU copies
+    'benchmark': True, # 如果输入大小不变，则设置为True以提高性能
+    'num_workers': 4,  # 根据您机器的核心数进行调整
+    'pin_memory': True, # 有助于加快数据到GPU的传输速度
+    'non_blocking': True # 与pin_memory一起使用以进行异步GPU复制
 }
 
 
@@ -111,8 +111,12 @@ GPU_CONFIG = {
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 # ----------------- Deprecated Proxy Setting -----------------
-# The PROXY setting is deprecated. Use DEFAULTS['proxy_url'] in the root config instead.
+# PROXY设置已弃用。请改用根配置中的DEFAULTS['proxy_url']。
 PROXY = None 
+
+# ----------------- Log Language Config -----------------
+LOG_LANG = 'zh'  # 可选值：'zh'（中文日志）、'en'（英文日志）
+# 目前没有用处，预留接口。
 
 def get_all_models():
     """返回所有模型配置的字典。"""

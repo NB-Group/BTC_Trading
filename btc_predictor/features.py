@@ -38,8 +38,8 @@ def create_features(df: pd.DataFrame, model_name: str) -> pd.DataFrame:
     # ATR (标准14周期)
     df_copy['atr'] = average_true_range(high=high.astype(float), low=low.astype(float), close=close.astype(float), window=14)
 
-    # --- NEW: Advanced Features ---
-    # 1. Volatility Ratio
+    # --- 新增：高级特征 ---
+    # 1. 波动率比率
     atr100 = average_true_range(high=high.astype(float), low=low.astype(float), close=close.astype(float), window=100)
     df_copy['atr_ratio'] = df_copy['atr'] / atr100
 
@@ -58,7 +58,7 @@ def create_features(df: pd.DataFrame, model_name: str) -> pd.DataFrame:
     df_copy['day_cos'] = np.cos(2 * np.pi * dayofweek / 7)
     df_copy['hour_sin'] = np.sin(2 * np.pi * hour / 24)
     df_copy['hour_cos'] = np.cos(2 * np.pi * hour / 24)
-    # --- END: Advanced Features ---
+    # --- 高级特征结束 ---
 
     # 移动平均线
     # 确保'ma60'总是被计算，因为它是交叉策略的核心

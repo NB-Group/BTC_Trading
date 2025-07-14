@@ -25,12 +25,12 @@ N_TRIALS = 50 # Optuna 优化的试验次数
 
 def objective(trial: optuna.Trial, model_name: str, X_train, y_train, X_val, y_val) -> float:
     """
-    Optuna 的目标函数，用于寻找最佳超参数。
+    Optuna 的目标函数，用于寻找最优超参数。
     """
     model_config = get_model_config(model_name)
     task = model_config.get('task', 'regression')
 
-    # --- 1. 定义超参数搜索空间 (扩大版) ---
+    # --- 1. 定义超参数搜索空间（扩展版） ---
     params = {
         'learning_rate': trial.suggest_float('learning_rate', 1e-5, 1e-2, log=True), # 学习率范围更广
         'nhead': trial.suggest_categorical('nhead', [2, 4, 8, 16]), # 增加更多头
@@ -113,7 +113,7 @@ def run_optimization(model_name: str):
         LOGGER.error("数据为空，优化中止。")
         return
 
-    # 2. 数据拆分和缩放 (与 train.py 保持一致)
+    # 2. 数据拆分和缩放（与 train.py 保持一致）
     tscv = TimeSeriesSplit(n_splits=5)
     for train_index, val_index in tscv.split(X):
         pass # 获取最后一个拆分
@@ -144,14 +144,14 @@ def run_optimization(model_name: str):
         show_progress_bar=True
     )
 
-    # 4. 保存最佳参数
+    # 4. 保存最优参数
     best_params = study.best_params
     params_path = os.path.join(PATHS['results'], f"best_params_{model_name}.json")
     with open(params_path, 'w') as f:
         json.dump(best_params, f, indent=4)
         
     LOGGER.success(f"优化完成！最佳参数已保存至 {params_path}")
-    LOGGER.info(f"最佳试验分数 ({'RMSE' if task == 'regression' else 'F1-Score'}): {study.best_value}")
+    LOGGER.info(f"最佳试验分数（{'RMSE' if task == 'regression' else 'F1分数'}）: {study.best_value}")
     LOGGER.info(f"最佳参数: {best_params}")
 
 
