@@ -1,0 +1,8 @@
+{
+    "seq_length": 90,
+    "batch_size": 128,
+    "learning_rate": 0.008557672919091546,
+    "hidden_dim": 197,
+    "n_layers": 1,
+    "dropout": 0.26917959596919355
+}

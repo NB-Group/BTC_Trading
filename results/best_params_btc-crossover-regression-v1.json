@@ -1,0 +1,8 @@
+{
+    "learning_rate": 0.0015027980586544447,
+    "nhead": 4,
+    "num_encoder_layers": 4,
+    "dim_feedforward": 256,
+    "dropout": 0.3795832693889323,
+    "batch_size": 32
+}

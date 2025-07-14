@@ -1,0 +1,57 @@
+{
+    "timestamp": "2025-07-07T18:23:20.325045",
+    "model_type": "IsolationForest",
+    "contamination_rate": 0.13748463161498015,
+    "best_threshold": -0.10041340342492516,
+    "best_f1_score": 0.25141562853907135,
+    "roc_auc": 0.5151075192397507,
+    "classification_report": {
+        "0": {
+            "precision": 1.0,
+            "recall": 0.0067618332081141996,
+            "f1-score": 0.013432835820895522,
+            "support": 1331.0
+        },
+        "1": {
+            "precision": 0.14378238341968913,
+            "recall": 1.0,
+            "f1-score": 0.25141562853907135,
+            "support": 222.0
+        },
+        "accuracy": 0.14874436574372182,
+        "macro avg": {
+            "precision": 0.5718911917098446,
+            "recall": 0.5033809166040571,
+            "f1-score": 0.13242423217998345,
+            "support": 1553.0
+        },
+        "weighted avg": {
+            "precision": 0.8776044360071932,
+            "recall": 0.14874436574372182,
+            "f1-score": 0.047452269165026255,
+            "support": 1553.0
+        }
+    },
+    "feature_names": [
+        "rsi",
+        "stoch",
+        "macd",
+        "macd_signal",
+        "stoch_k",
+        "stoch_d",
+        "stoch_smooth_k",
+        "atr",
+        "bb_bbm",
+        "bb_bbh",
+        "bb_bbl",
+        "ma_short",
+        "ma_long",
+        "bb_width",
+        "dist_from_ma",
+        "realized_volatility",
+        "volume_roc",
+        "roc",
+        "atr_ratio",
+        "volume_ratio"
+    ]
+}

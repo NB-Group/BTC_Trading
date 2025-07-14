@@ -1,0 +1,303 @@
+import ccxt
+from typing import Optional, Dict, Any, Union
+from decimal import Decimal
+
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+import config
+from btc_predictor.utils import LOGGER
+
+class OKXTrader:
+    """
+    OKXTrader 类用于与 OKX 交易所进行期货交互。
+    """
+    def __init__(self, demo_mode: bool = True):
+        """初始化OKXTrader。"""
+        self.demo_mode = demo_mode
+        
+        # 从配置加载期货设置
+        futures_config = config.FUTURES
+        self.trade_symbol = futures_config['trade_symbol']
+        self.leverage = futures_config['leverage']
+        self.margin_mode = futures_config['margin_mode']
+
+        creds = config.API_KEYS.get('okx', {})
+        self.exchange_config: Dict[str, Any] = {
+            'apiKey': creds.get('api_key', ''),
+            'secret': creds.get('secret_key', ''),
+            'password': creds.get('passphrase', ''),
+            'options': {
+                'defaultType': 'swap',
+            },
+        }
+        
+        self.exchange: ccxt.okx = ccxt.okx(self.exchange_config) # type: ignore
+        
+        proxy_url = config.DEFAULTS.get('proxy_url')
+        if proxy_url:
+            self.exchange.proxies = {'http': proxy_url, 'https': proxy_url} # type: ignore
+
+        if self.demo_mode:
+            self.exchange.set_sandbox_mode(True)
+            LOGGER.info(f"OKX Trader 已初始化 (模拟盘模式) - 交易对: {self.trade_symbol}")
+        else:
+            LOGGER.info(f"OKX Trader 已初始化 (实盘模式) - 交易对: {self.trade_symbol}")
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def get_position(self) -> Optional[Dict[str, Any]]:
+        """
+        获取指定交易对的仓位信息。
+        如果无仓位，返回 None。
+        """
+        if self.demo_mode:
+            LOGGER.info("模拟模式：不获取真实仓位，返回 None。")
+            return None
+        try:
+            # ccxt V4 接受符号列表
+            positions = self.exchange.fetch_positions([self.trade_symbol])
+            
+            # 过滤掉数量为0的仓位并返回第一个
+            for p in positions:
+                # OKX即使仓位已关闭也会返回仓位信息，所以我们需要检查合约/数量
+                if float(p.get('contracts', 0) or p.get('info', {}).get('pos', 0)) != 0:
+                    LOGGER.info(f"获取到仓位信息: {p['info']}")
+                    return p['info'] # 返回原始info字典，包含更多信息
+            return None
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            LOGGER.error(f"获取仓位失败: {e}")
+            raise
+        return None
+
+    def get_positions(self, instId: Optional[str] = None):
+        """
+        Dashboard compatibility: returns a list with the current position (or empty list).
+        """
+        pos = self.get_position()
+        return [pos] if pos else []
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def set_leverage(self):
+        """为交易对设置杠杆。"""
+        if self.demo_mode:
+            LOGGER.info(f"模拟模式：假装为 {self.trade_symbol} 设置杠杆为 {self.leverage}x。")
+            return
+
+        try:
+            self.exchange.set_leverage(self.leverage, self.trade_symbol)
+            LOGGER.success(f"已为 {self.trade_symbol} 设置杠杆为 {self.leverage}x")
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            LOGGER.error(f"设置杠杆失败: {e}")
+            raise
+
+    def execute_decision(self, decision_data: Dict[str, Any]):
+        """
+        根据LLM决策字典智能执行期货交易。
+        """
+        decision = decision_data.get('decision', 'HOLD').upper()
+        params = decision_data.get('trade_params', {})
+        suggested_trade_size = decision_data.get('suggested_trade_size', 0.95)  # 默认使用95%资金
+        
+        if self.demo_mode:
+            LOGGER.warning("当前为模拟盘模式，所有交易操作将被记录但不会真实执行。")
+            LOGGER.info(f"模拟执行决策: {decision}，参数: {params}")
+            # 在模拟模式下，我们直接返回，不执行任何操作
+            return
+
+        try:
+            position_info = self.get_position()
+            
+            # --- 决策执行逻辑 ---
+            if decision == 'HOLD':
+                LOGGER.success("决策为 HOLD，无需执行任何交易。")
+                return
+
+            # 如果需要开仓 (LONG or SHORT)
+            if decision in ['LONG', 'SHORT']:
+                if position_info:
+                    LOGGER.warning(f"决策为 {decision}，但已存在仓位，请先平仓。操作已取消。")
+                    return
+                
+                # 获取当前市场价格
+                ticker = self.exchange.fetch_ticker(self.trade_symbol)
+                current_price = ticker['last']
+                
+                # 设置杠杆（使用决策中的杠杆参数）
+                leverage = params.get('leverage', self.leverage)
+                self.exchange.set_leverage(leverage, self.trade_symbol)
+                
+                # 计算下单数量（使用建议的仓位大小）
+                balance = self.get_balance('USDT')
+                trade_value = balance * suggested_trade_size
+                amount = (trade_value * leverage) / current_price
+                
+                # 检查是否满足OKX的最小数量要求
+                min_amount = 0.01  # OKX要求的最小数量
+                if amount < min_amount:
+                    # 如果计算的数量小于最小要求，检查是否有足够资金
+                    if current_price is not None:
+                        required_value = (min_amount * float(current_price)) / leverage
+                        if required_value <= balance:
+                            # 有足够资金，使用最小数量
+                            amount = min_amount
+                            trade_value = required_value
+                            LOGGER.warning(f"计算数量 {amount:.6f} BTC 小于最小要求，调整为最小数量 {min_amount} BTC")
+                        else:
+                            # 资金不足，无法开仓
+                            LOGGER.error(f"资金不足，无法满足最小数量要求。需要 ${required_value:.2f}，当前余额 ${balance:.2f}")
+                            return
+                    else:
+                        LOGGER.error("无法获取当前价格，无法计算所需资金")
+                        return
+                else:
+                    # 确保数量在合理范围内
+                    amount = min(amount, 1.0)  # 最大1.0 BTC
+                
+                side = 'buy' if decision == 'LONG' else 'sell'
+                pos_side = 'long' if decision == 'LONG' else 'short'
+                
+                LOGGER.info(f"准备开新仓: {decision} {amount:.6f} {self.trade_symbol} (杠杆: {leverage}x, 价值: ${trade_value:.2f})...")
+                
+                # 创建市价单
+                order = self.exchange.create_order(
+                    symbol=self.trade_symbol,
+                    type='market',
+                    side=side,
+                    amount=amount,
+                    params={'posSide': pos_side, 'tdMode': self.margin_mode}
+                )
+                LOGGER.success(f"开仓 ({decision}) 订单已成功提交，订单ID: {order.get('id', 'N/A')}")
+                
+                # 设置止损和止盈订单（如果提供了百分比参数）
+                if 'stop_loss_pct' in params or 'take_profit_pct' in params:
+                    if current_price is not None:
+                        self._set_stop_orders(order, float(current_price), params, pos_side)
+
+            # 如果需要平仓 (CLOSE_LONG or CLOSE_SHORT)
+            elif decision in ['CLOSE_LONG', 'CLOSE_SHORT']:
+                if not position_info:
+                    LOGGER.warning(f"决策为 {decision}，但当前无仓位。无需操作。")
+                    return
+
+                current_pos_side = position_info.get('posSide')
+                decision_pos_side = 'long' if decision == 'CLOSE_LONG' else 'short'
+                
+                # 兼容OKX的net持仓模式
+                if current_pos_side == 'net':
+                    pos_amount_str = position_info.get('pos')
+                    if pos_amount_str and float(pos_amount_str) > 0:
+                        effective_side = 'long'
+                    elif pos_amount_str and float(pos_amount_str) < 0:
+                        effective_side = 'short'
+                    else:
+                        effective_side = 'none' # 无有效持仓
+                    LOGGER.info(f"检测到 'net' 持仓模式, 根据持仓量判断实际方向为: {effective_side}")
+                    current_pos_side = effective_side
+
+                if current_pos_side != decision_pos_side:
+                    LOGGER.error(f"决策平仓方向 ({decision_pos_side}) 与实际持仓方向 ({current_pos_side}) 不符！操作取消。")
+                    return
+                
+                pos_amount_str = position_info.get('pos')
+                if not pos_amount_str:
+                    LOGGER.error("无法从仓位信息中获取持仓数量 ('pos')。平仓操作取消。")
+                    return
+
+                amount = float(pos_amount_str)
+                side = 'sell' if current_pos_side == 'long' else 'buy'
+
+                LOGGER.info(f"准备平仓: {decision} {amount} {self.trade_symbol}...")
+                order = self.exchange.create_order(
+                    symbol=self.trade_symbol,
+                    type='market',
+                    side=side,
+                    amount=amount,
+                    params={'posSide': current_pos_side, 'tdMode': self.margin_mode}
+                )
+                LOGGER.success(f"平仓 ({decision}) 订单已成功提交，订单ID: {order.get('id', 'N/A')}")
+
+        except (ccxt.NetworkError, ccxt.ExchangeError) as e:
+            LOGGER.error(f"执行交易决策时发生交易所错误: {e}", exc_info=True)
+        except Exception as e:
+            LOGGER.error(f"执行交易决策时发生未知错误: {e}", exc_info=True)
+
+    def _set_stop_orders(self, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str):
+        """
+        设置止损和止盈订单。
+        """
+        try:
+            # 确保entry_price是float类型
+            entry_price = float(entry_price)
+            
+            stop_loss_pct = params.get('stop_loss_pct')
+            take_profit_pct = params.get('take_profit_pct')
+            
+            if stop_loss_pct:
+                # 计算止损价格
+                if pos_side == 'long':
+                    stop_loss_price = entry_price * (1 - stop_loss_pct / 100)
+                else:
+                    stop_loss_price = entry_price * (1 + stop_loss_pct / 100)
+                
+                # 创建止损订单
+                stop_order = self.exchange.create_order(
+                    symbol=self.trade_symbol,
+                    type='market',  # 使用market类型避免类型错误
+                    side='sell' if pos_side == 'long' else 'buy',
+                    amount=main_order['amount'],
+                    params={
+                        'posSide': pos_side,
+                        'tdMode': self.margin_mode,
+                        'stopPrice': stop_loss_price
+                    }
+                )
+                LOGGER.info(f"止损订单已设置: 价格 ${stop_loss_price:.2f}")
+            
+            if take_profit_pct:
+                # 计算止盈价格
+                if pos_side == 'long':
+                    take_profit_price = entry_price * (1 + take_profit_pct / 100)
+                else:
+                    take_profit_price = entry_price * (1 - take_profit_pct / 100)
+                
+                # 创建止盈订单
+                take_profit_order = self.exchange.create_order(
+                    symbol=self.trade_symbol,
+                    type='limit',
+                    side='sell' if pos_side == 'long' else 'buy',
+                    amount=main_order['amount'],
+                    price=take_profit_price,
+                    params={
+                        'posSide': pos_side,
+                        'tdMode': self.margin_mode
+                    }
+                )
+                LOGGER.info(f"止盈订单已设置: 价格 ${take_profit_price:.2f}")
+                
+        except Exception as e:
+            LOGGER.error(f"设置止损/止盈订单时发生错误: {e}")
+
+    def get_balance(self, currency: str = 'USDT'):
+        """
+        Return available margin (equity) for the futures account. For dashboard compatibility.
+        """
+        if self.demo_mode:
+            LOGGER.info(f"Demo mode: returning fixed margin balance for {currency}: 500.0")
+            return 500.0
+        try:
+            balance = self.exchange.fetch_balance()
+            info = balance.get('info', {})
+            usdt_info = info.get('USDT') if isinstance(info, dict) else None
+            if usdt_info and isinstance(usdt_info, dict):
+                equity = float(usdt_info.get('eq', 0))
+                LOGGER.info(f"Futures margin (equity) for {currency}: {equity}")
+                return equity
+            # 备用方案：尝试从total获取
+            if 'total' in balance and currency in balance['total']:
+                equity = float(balance['total'][currency])
+                LOGGER.info(f"Futures margin (equity) for {currency}: {equity}")
+                return equity
+            LOGGER.warning(f"Could not find margin (equity) for {currency} in balance response.")
+            return 0
+        except Exception as e:
+            LOGGER.error(f"Error fetching margin (equity) for {currency}: {e}")
+            return 0 
