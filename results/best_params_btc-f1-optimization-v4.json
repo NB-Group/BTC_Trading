@@ -1,0 +1,13 @@
+{
+    "sl_pct": 4.770166580441842,
+    "meta_label_horizon": 47,
+    "model_type": "lstm",
+    "seq_length": 48,
+    "batch_size": 256,
+    "learning_rate": 0.00148549452450028,
+    "hidden_size": 32,
+    "num_layers": 2,
+    "dropout": 0.4826999547015939,
+    "weight_decay": 0.0007615159205765904,
+    "best_threshold": 0.5
+}

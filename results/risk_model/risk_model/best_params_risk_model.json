@@ -1,0 +1,9 @@
+{
+    "timestamp": "2025-07-06T22:07:10.258772",
+    "best_f1_score": 0.25,
+    "best_params": {
+        "n_estimators": 100,
+        "max_samples": 0.7196022597238965,
+        "contamination": 0.13748463161498015
+    }
+}

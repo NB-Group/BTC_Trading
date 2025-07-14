@@ -1,0 +1,18 @@
+{
+    "classification_f1_score": 0.6823529411764706,
+    "classification_precision": 0.5178571428571429,
+    "classification_recall": 1.0,
+    "regression_rmse": 0.006624666370901674,
+    "duration_rmse": 3.212901552337518,
+    "confusion_matrix_path": "results/confusion_matrix_final.png",
+    "equity_curve_path": "results/equity_curve_final.png",
+    "backtest_total_return_pct": -8.77669439048927,
+    "backtest_sharpe_ratio": -22.894973068594016,
+    "backtest_max_drawdown_usd": 1099.5866950282762,
+    "backtest_max_drawdown_pct": 10.796173496355038,
+    "backtest_win_rate": 51.78571428571429,
+    "backtest_num_trades": 56,
+    "backtest_avg_return_per_trade_pct": -0.15672668554445118,
+    "best_trial_number": 44,
+    "best_trial_value": -0.15934813215843543
+}

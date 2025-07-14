@@ -1,0 +1,11 @@
+{
+    "model_type": "gru",
+    "seq_length": 12,
+    "batch_size": 128,
+    "learning_rate": 0.0024027234134603873,
+    "hidden_size": 116,
+    "num_layers": 2,
+    "dropout": 0.21702016049310777,
+    "weight_decay": 0.0009619520561022285,
+    "meta_label_horizon": 62
+}

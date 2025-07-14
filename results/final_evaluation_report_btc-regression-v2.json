@@ -1,0 +1,10 @@
+{
+    "study_name": "btc-regression-v2",
+    "evaluation_period_start": "1655971200000",
+    "evaluation_period_end": "1659711600000",
+    "num_predictions": 39,
+    "metrics": {
+        "rmse": 0.035000106654351486,
+        "mae": 0.02728652687493645
+    }
+}

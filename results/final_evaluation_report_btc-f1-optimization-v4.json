@@ -1,0 +1,11 @@
+{
+    "f1_score": 0.970954356846473,
+    "precision": 0.9435483870967742,
+    "recall": 1.0,
+    "confusion_matrix_path": "results/confusion_matrix_final.png",
+    "equity_curve_path": "results/equity_curve_final.png",
+    "total_return_pct": 10.758366167797085,
+    "sharpe_ratio": 4.276518492031637,
+    "num_trades": 124,
+    "win_rate": 48.38709677419355
+}
