@@ -7,19 +7,19 @@ from .utils import LOGGER
 
 def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tuple[str, str]]:
     """
-    Create a K-line chart with technical indicators and save as an image file.
-    Args:
-        df: DataFrame with OHLCV data
-        save_dir: Directory to save the image
-    Returns:
-        Tuple[image_path, data_time_range] if successful, else None
+    创建带有技术指标的K线图并保存为图片文件。
+    参数：
+        df: 包含OHLCV数据的DataFrame
+        save_dir: 图片保存目录
+    返回：
+        Tuple[image_path, data_time_range]，成功时返回，否则返回None
     """
     try:
         if df is None or len(df) < 100:
-            LOGGER.warning(f"Not enough data (need at least 100, got {len(df) if df is not None else 0}), cannot generate K-line chart.")
+            LOGGER.warning(f"数据不足 (需要至少100，实际获取到 {len(df) if df is not None else 0} 条数据)，无法生成K线图。")
             return None
         os.makedirs(save_dir, exist_ok=True)
-        # --- Technical indicators ---
+        # --- 技术指标 ---
         ma_7 = pd.Series(df['close'].rolling(window=7).mean(), name='MA7')
         ma_25 = pd.Series(df['close'].rolling(window=25).mean(), name='MA25')
         ma_99 = pd.Series(df['close'].rolling(window=99).mean(), name='MA99')
@@ -38,10 +38,10 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
             start_hour_str = start_time.strftime("%Y%m%d_%H")
             end_hour_str = end_time.strftime("%Y%m%d_%H")
             data_time_range = f"{start_hour_str}_to_{end_hour_str}_{len(df)}bars"
-            LOGGER.info(f"Generating K-line chart, data range: {start_time} to {end_time} ({len(df)} bars)")
+            LOGGER.info(f"正在生成K线图，数据范围：{start_time} 至 {end_time} ({len(df)} 条数据)")
         else:
             data_time_range = f"generic_data_{len(df)}bars"
-            LOGGER.info(f"Generating K-line chart for generic index data ({len(df)} bars)")
+            LOGGER.info(f"正在生成K线图，适用于通用索引数据 ({len(df)} 条数据)")
         market_colors = mpf.make_marketcolors(
             up='#00b764',
             down='#f54748',
@@ -64,9 +64,9 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
         plot_ma_20_bb = ma_20.tail(48)
         plot_rsi = rsi.tail(48)
         add_plots = [
-            mpf.make_addplot(plot_ma_7, color='#ffffff', width=1.0),    # MA7: white
-            mpf.make_addplot(plot_ma_25, color='#f0b90a', width=1.0),   # MA25: yellow
-            mpf.make_addplot(plot_ma_99, color='#8a2be2', width=1.0),   # MA99: purple
+            mpf.make_addplot(plot_ma_7, color='#ffffff', width=1.0),    # MA7：白色
+            mpf.make_addplot(plot_ma_25, color='#f0b90a', width=1.0),   # MA25：黄色
+            mpf.make_addplot(plot_ma_99, color='#8a2be2', width=1.0),   # MA99：紫色
             mpf.make_addplot(plot_bollinger_upper, color='#00ffff', width=0.8),
             mpf.make_addplot(plot_bollinger_lower, color='#00ffff', width=0.8),
             mpf.make_addplot(plot_ma_20_bb, color='#ffa500', width=1.2, linestyle='--'),
@@ -86,7 +86,7 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
             title_str = f'BTC/USDT {timeframe_str} K-line Chart ({start_time_str} ~ {end_time_str})'
         mpf.plot(
             plot_df,
-            type='candle',
+            type='ohlc',
             style=style,
             addplot=add_plots,
             volume=True,
@@ -98,14 +98,14 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
             tight_layout=True,
             savefig=dict(fname=image_path, dpi=120, bbox_inches='tight')
         )
-        LOGGER.success(f"K-line chart saved to: {image_path}")
+        LOGGER.success(f"K线图已保存到: {image_path}")
         return image_path, data_time_range
     except Exception as e:
-        LOGGER.error(f"Error generating K-line chart: {e}", exc_info=True)
+        LOGGER.error(f"生成K线图时出错: {e}", exc_info=True)
         return None
 
 if __name__ == '__main__':
-    # Unit test
+    # 单元测试
     from btc_predictor.data import get_data
     from btc_predictor.config import DATA_CONFIG
     print("--- Running K-line Plotter Standalone Test ---")
@@ -116,10 +116,10 @@ if __name__ == '__main__':
         result = create_kline_image(test_data, save_dir="temp_test_cache")
         if result:
             image_path, data_time_range = result
-            print(f"\nTest success! K-line chart saved to: {image_path}")
-            print(f"Data time range: {data_time_range}")
-            print("Check the temp_test_cache folder in the project root.")
+            print(f"\n测试成功！K线图已保存到: {image_path}")
+            print(f"数据时间范围: {data_time_range}")
+            print("请检查项目根目录下的 temp_test_cache 文件夹。")
         else:
-            print("\nTest failed, could not generate K-line chart. Check logs for details.")
+            print("\n测试失败，无法生成K线图。请检查日志获取详细信息。")
     else:
-        print("\nFailed to get data, cannot test K-line chart generation.") 
+        print("\n获取数据失败，无法测试K线图生成。") 

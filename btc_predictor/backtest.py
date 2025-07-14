@@ -9,10 +9,12 @@ from loguru import logger as LOGGER
 from tqdm.auto import tqdm # 引入tqdm
 
 # --- Start: Path Fix ---
+# --- 路径修正开始 ---
 project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 # --- End: Path Fix ---
+# --- 路径修正结束 ---
 
 from btc_predictor.data import get_data
 from btc_predictor.predict import predict_for_event
@@ -25,7 +27,7 @@ def run_event_driven_backtest(model_name: str, prediction_threshold: float, ma_w
     运行一个完整的事件驱动回测。
     此版本经过重构，以严格模拟逐根K线的时间流逝，防止前视偏差。
     
-    Returns:
+    返回：
         dict: 包含回测结果的字典。
     """
     model = artifacts['model']
@@ -154,8 +156,8 @@ def run_event_driven_backtest(model_name: str, prediction_threshold: float, ma_w
     # 4. 计算并返回统计数据
     if not trades:
         return {
-            "Total Return [%]": 0, "Total Trades": 0, "Win Rate [%]": 0,
-            "Profit Factor": 0, "Avg Win": 0, "Avg Loss": 0, "Threshold": prediction_threshold
+            "总回报率 [%]": 0, "总交易次数": 0, "胜率 [%]": 0,
+            "盈亏比": 0, "平均盈利": 0, "平均亏损": 0, "阈值": prediction_threshold
         }
 
     trades_df = pd.DataFrame(trades)
@@ -173,13 +175,13 @@ def run_event_driven_backtest(model_name: str, prediction_threshold: float, ma_w
     profit_factor = abs(wins['pnl'].sum() / sum_of_losses) if sum_of_losses != 0 else np.inf
 
     return {
-        "Total Return [%]": total_return,
-        "Total Trades": len(trades_df),
-        "Win Rate [%]": win_rate,
-        "Profit Factor": profit_factor,
-        "Avg Win": avg_win,
-        "Avg Loss": avg_loss,
-        "Threshold": prediction_threshold
+        "总回报率 [%]": total_return,
+        "总交易次数": len(trades_df),
+        "胜率 [%]": win_rate,
+        "盈亏比": profit_factor,
+        "平均盈利": avg_win,
+        "平均亏损": avg_loss,
+        "阈值": prediction_threshold
     }
 
 
@@ -230,10 +232,10 @@ if __name__ == '__main__':
             results.append(result)
         
         results_df = pd.DataFrame(results)
-        results_df.set_index('Threshold', inplace=True)
+        results_df.set_index('阈值', inplace=True)
         
         # 找到最佳结果
-        best_threshold = results_df['Total Return [%]'].idxmax()
+        best_threshold = results_df['总回报率 [%]'].idxmax()
         best_result = results_df.loc[best_threshold]
 
         print("\n--- 阈值优化结果 ---")

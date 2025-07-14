@@ -14,25 +14,33 @@ from typing import Dict, Any
 from torch.utils.data import Dataset
 
 # 从btc_predictor自己的配置导入
-from .config import LOG_FILE, PATHS, DEVICE, MODEL_CONFIG, FEATURE_CONFIG, get_model_config
+from .config import LOG_FILE, PATHS, DEVICE, MODEL_CONFIG, FEATURE_CONFIG, get_model_config, LOG_LANG
 from .model import create_model
 
 # --- 日志记录 ---
 
 def setup_logger():
-    """设置loguru日志记录器。"""
-    logger.remove() 
+    """
+    设置loguru日志记录器，支持中英文切换。
+    """
+    logger.remove()
+    if LOG_LANG == 'zh':
+        fmt_console = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        fmt_file = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+    else:
+        fmt_console = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        fmt_file = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
     logger.add(
         sys.stderr,
         level="INFO",
-        format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        format=fmt_console
     )
     logger.add(
-        LOG_FILE, # Use the path from config
+        LOG_FILE,
         level="DEBUG",
         rotation="10 MB",
         retention="10 days",
-        format="{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+        format=fmt_file
     )
     return logger
 
@@ -42,17 +50,17 @@ LOGGER = setup_logger()
 # --- 新增：模型加载工具 ---
 def load_model_artifacts(model_name: str, verbose: bool = True) -> Dict[str, Any]:
     """
-    加载指定模型的所有相关工件：模型权重、缩放器和最佳参数。
+    加载指定模型的所有相关工件：模型权重、缩放器和最优参数。
 
-    Args:
-        model_name (str): 模型的名称，应与config.py中定义的键匹配。
+    参数：
+        model_name (str): 模型名称，应与config.py中定义的键匹配。
         verbose (bool): 是否打印加载日志。
 
-    Returns:
+    返回：
         dict: 包含所有加载工件的字典。
               例如: {'model': model_object, 'scaler_X': scaler_X_object, ...}
     
-    Raises:
+    异常：
         FileNotFoundError: 如果任何必需的文件（模型、参数、缩放器）不存在。
         Exception: 捕获其他可能的加载错误。
     """

@@ -13,16 +13,16 @@ from .features import create_features
 def predict_for_event(model: torch.nn.Module, scaler_X, feature_names: list, event_data: pd.DataFrame) -> Optional[float]:
     """
     为单个交叉事件实时生成预测。
-    这个版本接收已加载的模型和scaler，以提高性能。
+    该版本接收已加载的模型和scaler，以提升性能。
     
-    Args:
-        model (torch.nn.Module): 预先加载的PyTorch模型。
-        scaler_X: 预先加载的特征缩放器。
-        feature_names (list): 模型使用的特征名称列表。
+    参数：
+        model (torch.nn.Module): 已加载的PyTorch模型。
+        scaler_X: 已加载的特征缩放器。
+        feature_names (list): 模型使用的特征名列表。
         event_data (pd.DataFrame): 包含单行事件数据的DataFrame。
 
-    Returns:
-        Optional[float]: 对未来最大回报率的单个浮点数预测，如果出错则返回None。
+    返回：
+        Optional[float]: 对未来最大回报率的单个浮点数预测，出错时返回None。
     """
     try:
         # --- FIX: Ensure we only use features the scaler was fitted on ---
@@ -162,7 +162,7 @@ def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
             "predicted_return": prediction,
             "timestamp": latest.name.isoformat(),
             "current_price": latest['close'],
-            "info": "Signal processed successfully." # 明确的成功信息
+            "info": "信号处理成功。" # 明确的成功信息
         }
         LOGGER.info(f"实时信号获取成功: {result}")
         return result

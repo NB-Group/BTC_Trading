@@ -106,7 +106,18 @@ def create_model(
     # 通用
     dropout: float = 0.1,
     **kwargs) -> nn.Module:
-    
+    """
+    创建并返回指定类型的模型实例。
+    参数：
+        input_dim: 输入特征维度
+        model_type: 模型类型（'transformer' 或 'lstm'）
+        task: 任务类型（'regression' 或 'classification'）
+        d_model, n_head, n_layers, dim_feedforward: Transformer参数
+        hidden_dim: LSTM参数
+        dropout: Dropout概率
+    返回：
+        nn.Module实例
+    """
     if model_type == 'transformer':
         model = BTCPriceTransformer(
             input_dim=input_dim,

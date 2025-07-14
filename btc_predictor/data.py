@@ -16,10 +16,13 @@ from .features import create_features, prepare_training_data
 import config as root_config # 导入根配置
 
 # --- Global State ---
+# --- 全局状态 ---
 _exchange = None
 
 def get_exchange() -> Optional[ccxt.Exchange]:
-    """初始化并返回带有代理支持的ccxt交易所实例。"""
+    """
+    初始化并返回带有代理支持的ccxt交易所实例。
+    """
     global _exchange
     if _exchange:
         return _exchange
@@ -54,16 +57,16 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Op
     
     这是主要的获取数据函数。它从 'since' 参数获取所有可用数据，更新缓存中的最新数据，并存储它。
     
-    参数:
+    参数：
         symbol (str): 交易符号 (例如: 'BTC/USDT')。
         timeframe (str): 时间框架 (例如: '1h')。
         since (str, optional): 开始日期字符串，格式为ISO 8601。 
-                               Defaults to DATA_CONFIG['since']。
+                               默认为 DATA_CONFIG['since']。
         limit (int, optional): 此参数现在已忽略，因为函数获取所有可用数据，但保留以保持兼容性。
 
-    返回:
+    返回：
         pd.DataFrame: 包含OHLCV数据的DataFrame，按时间戳索引。
-                      Returns an empty dataframe on failure。
+                      失败时返回空DataFrame。
     """
     # 统一在这里定义cache_path
     cache_path = os.path.join(PATHS['cache'], f"v2_ohlcv_{symbol.replace('/', '')}_{timeframe}.pkl")
@@ -100,6 +103,7 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Op
     df = pd.DataFrame()
     
     # --- 1. Load from Cache ---
+    # --- 1. 从缓存加载 ---
     if os.path.exists(cache_path):
         try:
             df = pd.read_pickle(cache_path)
@@ -123,6 +127,7 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Op
             df = pd.DataFrame()
 
     # --- 2. Fetch New Data ---
+    # --- 2. 获取新数据 ---
     all_ohlcv = []
     LOGGER.info(f"Fetching all available data since {exchange.iso8601(start_timestamp)}...")
     
@@ -135,27 +140,28 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Op
         try:
             ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=current_timestamp, limit=1000)
             if not ohlcv:
-                LOGGER.info("No more new data available from the exchange.")
+                LOGGER.info("交易所没有更多新数据。")
                 break
             
             # 如果交易所返回相同的最后一根K线，防止无限循环
             if all_ohlcv and ohlcv[-1][0] == all_ohlcv[-1][0]:
-                LOGGER.warning("Duplicate data chunk received. Stopping fetch.")
+                LOGGER.warning("收到重复的数据块，停止获取。")
                 break
             
             all_ohlcv.extend(ohlcv)
             # 下一次请求的'since'是我们收到的最后一根K线的时间戳
             current_timestamp = ohlcv[-1][0]
             
-            LOGGER.info(f"Fetched {len(ohlcv)} new records... Total fetched in session: {len(all_ohlcv)}")
+            LOGGER.info(f"本次获取了 {len(ohlcv)} 条新数据，累计已获取 {len(all_ohlcv)} 条。")
             time.sleep(exchange.rateLimit / 1000) # 遵守速率限制
         
         except Exception as e:
-            LOGGER.error(f"An error occurred during fetch: {e}. Retrying in 5s...", exc_info=True)
+            LOGGER.error(f"获取数据时发生错误: {e}，5秒后重试...", exc_info=True)
             time.sleep(5)
             continue
 
     # --- 3. Combine, Save, and Return Data ---
+    # --- 3. 合并、保存并返回数据 ---
     if all_ohlcv:
         new_df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
@@ -173,7 +179,7 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Op
         
         # 将合并后的数据保存回缓存
         df.to_pickle(cache_path)
-        LOGGER.success(f"Data fetch complete. Total records in cache: {len(df)}. Saved to {cache_path}")
+        LOGGER.success(f"数据获取完成，缓存总记录数: {len(df)}，已保存到 {cache_path}")
 
     # 保证df始终为DataFrame
     if not isinstance(df, pd.DataFrame):
