@@ -1,0 +1,37 @@
+btc_predictor\model.py:40: error: Value of type "Tensor | Module" is not indexable  [index]
+data_ingestion\news_feeds.py:1: error: Library stubs not installed for "requests"  [import-untyped]
+decision_engine\vlm_analyzer.py:3: error: Library stubs not installed for "requests"  [import-untyped]
+btc_predictor\data.py:6: error: Library stubs not installed for "requests"  [import-untyped]
+btc_predictor\data.py:6: note: Hint: "python3 -m pip install types-requests"
+btc_predictor\data.py:6: note: (or run "mypy --install-types" to install all missing stub packages)
+btc_predictor\data.py:6: note: See https://mypy.readthedocs.io/en/stable/running_mypy.html#missing-imports
+btc_predictor\data.py:31: error: No overload variant of "getattr" matches argument types "Any", "object"  [call-overload]
+btc_predictor\data.py:31: note: Possible overload variants:
+btc_predictor\data.py:31: note:     def getattr(object, str, /) -> Any
+btc_predictor\data.py:31: note:     def getattr(object, str, None, /) -> Any | None
+btc_predictor\data.py:31: note:     def getattr(object, str, bool, /) -> Any | bool
+btc_predictor\data.py:31: note:     def getattr(object, str, list[Any], /) -> Any | list[Any]
+btc_predictor\data.py:31: note:     def getattr(object, str, dict[Any, Any], /) -> Any | dict[Any, Any]
+btc_predictor\data.py:31: note:     def [_T] getattr(object, str, _T, /) -> Any | _T
+btc_predictor\data.py:156: error: Need type annotation for "all_ohlcv" (hint: "all_ohlcv: list[<type>] = ...")  [var-annotated]
+btc_predictor\data.py:227: error: Argument "symbol" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+btc_predictor\data.py:227: error: Argument "timeframe" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+btc_predictor\predict.py:119: error: Argument "symbol" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+btc_predictor\predict.py:120: error: Argument "timeframe" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+btc_predictor\optimize.py:51: error: Argument "batch_size" to "DataLoader" has incompatible type "float"; expected "int | None"  [arg-type]
+btc_predictor\optimize.py:52: error: Argument "batch_size" to "DataLoader" has incompatible type "float"; expected "int | None"  [arg-type]
+dashboard.py:82: error: Argument "symbol" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+dashboard.py:82: error: Argument "timeframe" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+dashboard.py:103: error: Argument "symbol" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+dashboard.py:104: error: Argument "timeframe" to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+btc_predictor\backtest.py:45: error: Need type annotation for "current_trade" (hint: "current_trade: dict[<type>, <type>] = ...")  [var-annotated]
+btc_predictor\backtest.py:91: error: Unsupported operand types for - ("int" and "object")  [operator]
+btc_predictor\backtest.py:139: error: Unsupported operand types for * ("object" and "float")  [operator]
+btc_predictor\backtest.py:141: error: Unsupported operand types for + ("int" and "object")  [operator]
+btc_predictor\backtest.py:164: error: Unsupported operand types for + ("object" and "int")  [operator]
+btc_predictor\backtest.py:164: note: Right operand is of type "Any | int"
+btc_predictor\backtest.py:165: error: Unsupported operand types for / ("int" and "object")  [operator]
+btc_predictor\backtest.py:165: note: Left operand is of type "Any | int"
+btc_predictor\backtest.py:205: error: Argument 1 to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+btc_predictor\backtest.py:205: error: Argument 2 to "get_data" has incompatible type "object"; expected "str"  [arg-type]
+Found 24 errors in 8 files (checked 25 source files)

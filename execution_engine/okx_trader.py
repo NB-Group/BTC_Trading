@@ -20,6 +20,7 @@ class OKXTrader:
         self.trade_symbol = futures_config['trade_symbol']
         self.leverage = futures_config['leverage']
         self.margin_mode = futures_config['margin_mode']
+        self.hedge_mode = futures_config.get('hedge_mode', False)
 
         creds = config.API_KEYS.get('okx', {})
         self.exchange_config: Dict[str, Any] = {
@@ -64,7 +65,7 @@ class OKXTrader:
                     return p['info'] # 返回原始info字典，包含更多信息
             return None
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-            LOGGER.error(f"获取仓位失败: {e}")
+            LOGGER.error("获取仓位失败: {}", e)
             raise
         return None
 
@@ -86,7 +87,7 @@ class OKXTrader:
             self.exchange.set_leverage(self.leverage, self.trade_symbol)
             LOGGER.success(f"已为 {self.trade_symbol} 设置杠杆为 {self.leverage}x")
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-            LOGGER.error(f"设置杠杆失败: {e}")
+            LOGGER.error("设置杠杆失败: {}", e)
             raise
 
     def execute_decision(self, decision_data: Dict[str, Any]):
@@ -128,7 +129,12 @@ class OKXTrader:
                 # 计算下单数量（使用建议的仓位大小）
                 balance = self.get_balance('USDT')
                 trade_value = balance * suggested_trade_size
-                amount = (trade_value * leverage) / current_price
+                
+                # 计算下单张数（OKX永续合约1张=100美元名义价值）
+                contract_value = 100  # BTC-USDT-SWAP
+                amount = max(1, round(trade_value / contract_value))  # 至少1张
+                actual_value = amount * contract_value
+                LOGGER.info(f"实际下单张数: {amount} 张, 名义价值: ${actual_value}")
                 
                 # 检查是否满足OKX的最小数量要求
                 min_amount = 0.01  # OKX要求的最小数量
@@ -143,7 +149,7 @@ class OKXTrader:
                             LOGGER.warning(f"计算数量 {amount:.6f} BTC 小于最小要求，调整为最小数量 {min_amount} BTC")
                         else:
                             # 资金不足，无法开仓
-                            LOGGER.error(f"资金不足，无法满足最小数量要求。需要 ${required_value:.2f}，当前余额 ${balance:.2f}")
+                            LOGGER.error("资金不足，无法满足最小数量要求。需要 ${:.2f}，当前余额 ${:.2f}", required_value, balance)
                             return
                     else:
                         LOGGER.error("无法获取当前价格，无法计算所需资金")
@@ -155,16 +161,22 @@ class OKXTrader:
                 side = 'buy' if decision == 'LONG' else 'sell'
                 pos_side = 'long' if decision == 'LONG' else 'short'
                 
-                LOGGER.info(f"准备开新仓: {decision} {amount:.6f} {self.trade_symbol} (杠杆: {leverage}x, 价值: ${trade_value:.2f})...")
+                LOGGER.info(f"准备开新仓: {decision} {amount}张 {self.trade_symbol} (杠杆: {leverage}x, 价值: ${actual_value})...")
                 
                 # 创建市价单
+                order_params = {'tdMode': self.margin_mode}
+                if self.hedge_mode:
+                    order_params['posSide'] = pos_side
                 order = self.exchange.create_order(
                     symbol=self.trade_symbol,
                     type='market',
                     side=side,
                     amount=amount,
-                    params={'posSide': pos_side, 'tdMode': self.margin_mode}
+                    params=order_params
                 )
+                if isinstance(order, dict) and 'code' in order:
+                    LOGGER.error("下单失败，返回错误: {}", order)
+                    raise RuntimeError(f"下单失败: {order}")
                 LOGGER.success(f"开仓 ({decision}) 订单已成功提交，订单ID: {order.get('id', 'N/A')}")
                 
                 # 设置止损和止盈订单（如果提供了百分比参数）
@@ -194,7 +206,7 @@ class OKXTrader:
                     current_pos_side = effective_side
 
                 if current_pos_side != decision_pos_side:
-                    LOGGER.error(f"决策平仓方向 ({decision_pos_side}) 与实际持仓方向 ({current_pos_side}) 不符！操作取消。")
+                    LOGGER.error("决策平仓方向 ({}) 与实际持仓方向 ({}) 不符！操作取消。", decision_pos_side, current_pos_side)
                     return
                 
                 pos_amount_str = position_info.get('pos')
@@ -206,19 +218,25 @@ class OKXTrader:
                 side = 'sell' if current_pos_side == 'long' else 'buy'
 
                 LOGGER.info(f"准备平仓: {decision} {amount} {self.trade_symbol}...")
+                order_params = {'tdMode': self.margin_mode}
+                if self.hedge_mode:
+                    order_params['posSide'] = current_pos_side
                 order = self.exchange.create_order(
                     symbol=self.trade_symbol,
                     type='market',
                     side=side,
                     amount=amount,
-                    params={'posSide': current_pos_side, 'tdMode': self.margin_mode}
+                    params=order_params
                 )
+                if isinstance(order, dict) and 'code' in order:
+                    LOGGER.error("平仓下单失败，返回错误: {}", order)
+                    raise RuntimeError(f"平仓下单失败: {order}")
                 LOGGER.success(f"平仓 ({decision}) 订单已成功提交，订单ID: {order.get('id', 'N/A')}")
 
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
-            LOGGER.error(f"执行交易决策时发生交易所错误: {e}", exc_info=True)
+            LOGGER.error("执行交易决策时发生交易所错误: {}", e, exc_info=True)
         except Exception as e:
-            LOGGER.error(f"执行交易决策时发生未知错误: {e}", exc_info=True)
+            LOGGER.error("执行交易决策时发生未知错误: {}", e, exc_info=True)
 
     def _set_stop_orders(self, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str):
         """
@@ -239,17 +257,26 @@ class OKXTrader:
                     stop_loss_price = entry_price * (1 + stop_loss_pct / 100)
                 
                 # 创建止损订单
+                stop_order_params = {
+                    'tdMode': self.margin_mode,
+                    'stopPrice': stop_loss_price
+                }
+                if self.hedge_mode:
+                    stop_order_params['posSide'] = pos_side
+                # 创建止损订单
+                amount = float(main_order['amount'])
+                amount = round(amount, 4)
+                LOGGER.info(f"提交止损单，数量: {amount}, 类型: {type(amount)}")
                 stop_order = self.exchange.create_order(
                     symbol=self.trade_symbol,
-                    type='market',  # 使用market类型避免类型错误
+                    type='market',
                     side='sell' if pos_side == 'long' else 'buy',
-                    amount=main_order['amount'],
-                    params={
-                        'posSide': pos_side,
-                        'tdMode': self.margin_mode,
-                        'stopPrice': stop_loss_price
-                    }
+                    amount=amount,
+                    params=stop_order_params
                 )
+                if isinstance(stop_order, dict) and 'code' in stop_order:
+                    LOGGER.error("止损单下单失败，返回错误: {}", stop_order)
+                    raise RuntimeError(f"止损单下单失败: {stop_order}")
                 LOGGER.info(f"止损订单已设置: 价格 ${stop_loss_price:.2f}")
             
             if take_profit_pct:
@@ -260,21 +287,30 @@ class OKXTrader:
                     take_profit_price = entry_price * (1 - take_profit_pct / 100)
                 
                 # 创建止盈订单
+                take_profit_order_params = {
+                    'tdMode': self.margin_mode
+                }
+                if self.hedge_mode:
+                    take_profit_order_params['posSide'] = pos_side
+                # 创建止盈订单
+                amount = float(main_order['amount'])
+                amount = round(amount, 4)
+                LOGGER.info(f"提交止盈单，数量: {amount}, 类型: {type(amount)}")
                 take_profit_order = self.exchange.create_order(
                     symbol=self.trade_symbol,
                     type='limit',
                     side='sell' if pos_side == 'long' else 'buy',
-                    amount=main_order['amount'],
+                    amount=amount,
                     price=take_profit_price,
-                    params={
-                        'posSide': pos_side,
-                        'tdMode': self.margin_mode
-                    }
+                    params=take_profit_order_params
                 )
+                if isinstance(take_profit_order, dict) and 'code' in take_profit_order:
+                    LOGGER.error("止盈单下单失败，返回错误: {}", take_profit_order)
+                    raise RuntimeError(f"止盈单下单失败: {take_profit_order}")
                 LOGGER.info(f"止盈订单已设置: 价格 ${take_profit_price:.2f}")
                 
         except Exception as e:
-            LOGGER.error(f"设置止损/止盈订单时发生错误: {e}")
+            LOGGER.error("设置止损/止盈订单时发生错误: {}", e)
 
     def get_balance(self, currency: str = 'USDT'):
         """
@@ -299,5 +335,5 @@ class OKXTrader:
             LOGGER.warning(f"Could not find margin (equity) for {currency} in balance response.")
             return 0
         except Exception as e:
-            LOGGER.error(f"Error fetching margin (equity) for {currency}: {e}")
+            LOGGER.error("Error fetching margin (equity) for {}: {}", currency, e)
             return 0 

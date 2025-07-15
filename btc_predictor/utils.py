@@ -23,7 +23,7 @@ def setup_logger():
     """
     设置loguru日志记录器，支持中英文切换。
     """
-    logger.remove()
+    logger.remove() 
     if LOG_LANG == 'zh':
         fmt_console = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
         fmt_file = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
