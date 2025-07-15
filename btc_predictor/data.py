@@ -8,6 +8,7 @@ import pickle
 from datetime import datetime, timezone
 from typing import Optional, Tuple # 添加导入
 from tqdm import tqdm
+from tenacity import retry, stop_after_attempt, wait_exponential
 # 从模块内config导入其特有的配置
 from .config import DATA_CONFIG, PATHS, FEATURE_CONFIG, get_model_config
 from .utils import LOGGER
@@ -18,6 +19,11 @@ import config as root_config # 导入根配置
 # --- Global State ---
 # --- 全局状态 ---
 _exchange = None
+
+# 为所有外部请求加重试
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def fetch_with_retry(func, *args, **kwargs):
+    return func(*args, **kwargs)
 
 def get_exchange() -> Optional[ccxt.Exchange]:
     """
@@ -103,7 +109,7 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: in
         # --- 行为1: 'since' 未提供 - 只获取最新的 'limit' 条数据 ---
         LOGGER.info(f"正在获取最新的 {limit} 条数据...")
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            ohlcv = fetch_with_retry(exchange.fetch_ohlcv, symbol, timeframe, limit=limit)
             if not ohlcv:
                 LOGGER.error("无法从交易所获取最新数据。")
                 return pd.DataFrame()
@@ -163,7 +169,7 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: in
 
     while True:
         try:
-            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, since=current_timestamp, limit=1000)
+            ohlcv = fetch_with_retry(exchange.fetch_ohlcv, symbol, timeframe, since=current_timestamp, limit=1000)
             if not ohlcv:
                 LOGGER.info("交易所没有更多新数据。")
                 break
@@ -188,22 +194,25 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: in
     # --- 3. Combine, Save, and Return Data ---
     # --- 3. 合并、保存并返回数据 ---
     if all_ohlcv:
-        new_df = pd.DataFrame(all_ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        # 用rename方案，先不传columns，后续再赋值列名
+        new_df = pd.DataFrame(all_ohlcv)
+        if new_df.shape[1] == 6:
+            new_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
         new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
         new_df.set_index('timestamp', inplace=True)
-        
-        # 合并新旧数据，删除重复项并排序
-        if not df.empty:
-            df = pd.concat([df, new_df])
-        else:
-            df = new_df
-        
-        # 对于重复的索引保留最后一条记录
+        if not isinstance(df, pd.DataFrame):
+            df = pd.DataFrame(df)
+        if not new_df.empty:
+            if not df.empty:
+                df = pd.concat([df, new_df])
+            else:
+                df = new_df
+        if not isinstance(df, pd.DataFrame):
+            df = pd.DataFrame(df)
         df = df[~df.index.duplicated(keep='last')]
-        df.sort_index(inplace=True)
-        
-        # 将合并后的数据保存回缓存
-        df.to_pickle(cache_path)
+        if isinstance(df, pd.DataFrame):
+            df.sort_index(inplace=True)
+            df.to_pickle(cache_path)
         LOGGER.success(f"数据获取完成，缓存总记录数: {len(df)}，已保存到 {cache_path}")
 
     # 保证df始终为DataFrame

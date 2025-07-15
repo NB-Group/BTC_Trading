@@ -4,6 +4,11 @@ from typing import List, Dict, Any
 
 from btc_predictor.utils import LOGGER
 import config
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+@retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+def requests_get_with_retry(*args, **kwargs):
+    return requests.get(*args, **kwargs)
 
 def fetch_coindesk_news(limit: int = 15) -> List[Dict[str, Any]]:
     """
@@ -23,7 +28,7 @@ def fetch_coindesk_news(limit: int = 15) -> List[Dict[str, Any]]:
         proxy_url = config.DEFAULTS.get('proxy_url')
         proxies = {"http": proxy_url, "https": proxy_url} if proxy_url else None
         
-        response = requests.get(coindesk_rss_url, timeout=20, proxies=proxies)
+        response = requests_get_with_retry(coindesk_rss_url, timeout=20, proxies=proxies)
         response.raise_for_status()  # 如果请求失败 (如 404, 500)，则抛出异常
 
         root = ET.fromstring(response.content)
