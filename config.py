@@ -69,7 +69,7 @@ MACRO_ECONOMIC_KEYWORDS = [
 # VLM缓存配置
 # ==============================================================================
 VLM_CACHE = {
-    'enabled': True,           # 是否启用缓存
+    'enabled': False,           # 是否启用缓存
     'cache_hours': 1,          # 缓存有效期（小时）
     'cache_dir': 'cache'       # 缓存目录
 }

@@ -24,7 +24,12 @@ class VLMCache:
         # 从配置文件获取默认值
         cache_config = getattr(config, 'VLM_CACHE', {})
         self.enabled = cache_config.get('enabled', True)
-        
+        self.cache_dir = Path(cache_dir or cache_config.get('cache_dir', 'cache'))
+        self.cache_dir.mkdir(exist_ok=True)
+        self.tweet_cache_file = self.cache_dir / "vlm_tweet_cache.json"
+        self.kline_cache_file = self.cache_dir / "vlm_kline_cache.json"
+        self.cache_hours = cache_hours or cache_config.get('cache_hours', 4)
+
         if not self.enabled:
             LOGGER.info("VLM缓存已禁用，自动清理所有缓存文件。")
             for f in [self.tweet_cache_file, self.kline_cache_file]:
@@ -33,13 +38,6 @@ class VLMCache:
             self.tweet_cache = {}
             self.kline_cache = {}
             return
-        
-        self.cache_dir = Path(cache_dir or cache_config.get('cache_dir', 'cache'))
-        self.cache_dir.mkdir(exist_ok=True)
-        
-        self.tweet_cache_file = self.cache_dir / "vlm_tweet_cache.json"
-        self.kline_cache_file = self.cache_dir / "vlm_kline_cache.json"
-        self.cache_hours = cache_hours or cache_config.get('cache_hours', 4)
         
         # 加载现有缓存
         self.tweet_cache = self._load_cache(self.tweet_cache_file)
