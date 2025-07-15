@@ -190,7 +190,12 @@ def run_trading_cycle(skip_llm: bool = False):
         
         if skip_llm:
             LOGGER.warning("已设置--skip-llm，跳过LLM决策分析。")
-            final_decision = {"decision": "HOLD", "reasoning": "Skipped LLM analysis"}
+            final_decision = {
+                "decision": "HOLD",
+                "reasoning": "Skipped LLM analysis",
+                "trade_params": {},
+                "suggested_trade_size": 0.95
+            }
         else:
             analyzer = DeepSeekAnalyzer()
             final_decision = analyzer.get_trade_decision(
@@ -216,11 +221,40 @@ def run_trading_cycle(skip_llm: bool = False):
         # 步骤 7: 执行交易
         # ======================================================================
         LOGGER.info("="*50 + "\n步骤 7: 执行交易")
-        # 使用在步骤5中已经实例化的trader
+        # 深度类型校验与修正，防止类型污染
+        if not isinstance(final_decision, dict):
+            LOGGER.error("final_decision 不是字典，实际类型: {}，内容: {}", type(final_decision), final_decision)
+            return
+        # 强制类型修正
+        final_decision["decision"] = str(final_decision.get("decision", "HOLD"))
+        trade_params = final_decision.get("trade_params", {})
+        if not isinstance(trade_params, dict):
+            LOGGER.warning(f"trade_params 字段类型异常，已重置为空字典。实际值: {trade_params}")
+            trade_params = {}
+        final_decision["trade_params"] = trade_params
+        suggested_trade_size = final_decision.get("suggested_trade_size", 0.95)
+        try:
+            final_decision["suggested_trade_size"] = float(suggested_trade_size)
+        except Exception:
+            LOGGER.warning(f"suggested_trade_size 字段类型异常，已重置为0.95。实际值: {suggested_trade_size}")
+            final_decision["suggested_trade_size"] = 0.95
+        # 其余字段可按需补全
+        required_keys = ["decision", "trade_params", "suggested_trade_size"]
+        for k in required_keys:
+            if k not in final_decision:
+                LOGGER.warning(f"final_decision 缺少关键字段: {k}，将使用默认值。")
+                if k == "decision":
+                    final_decision["decision"] = str("HOLD")
+                elif k == "trade_params":
+                    final_decision["trade_params"] = dict()
+                elif k == "suggested_trade_size":
+                    final_decision["suggested_trade_size"] = float(0.95)
+        LOGGER.info(f"最终用于交易执行的决策数据: {final_decision}")
         trader.execute_decision(final_decision)
 
     except Exception as e:
-        LOGGER.critical(f"交易周期主循环发生严重错误: {e}", exc_info=True)
+        import traceback
+        LOGGER.critical("交易周期主循环发生严重错误: {}\n详细traceback:\n{}", repr(e), traceback.format_exc(), exc_info=True)
     finally:
         LOGGER.info("========== 本轮决策周期结束 ==========\n")
         _save_last_run_timestamp()
@@ -241,12 +275,14 @@ def main():
         return
 
     LOGGER.info("BTC智能决策系统 v5.0 主控程序已启动（调度模式）。")
-    schedule.every(1).hours.do(job)
     
+    # 只用schedule的每小时整点调度
+    schedule.every().hour.at(":00").do(job)
+
     last_run_utc = _get_last_run_timestamp()
     if not last_run_utc or (datetime.now(timezone.utc) - last_run_utc).total_seconds() > 3600:
-         LOGGER.warning("检测到错过的计划任务，立即补偿执行一次...")
-         job()
+        LOGGER.info("首次运行或检测到错过的计划任务，立即执行一次决策周期...")
+        job()
 
     LOGGER.info("系统正在等待下一个调度时间点... (按 Ctrl+C 退出)")
     while True:

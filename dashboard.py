@@ -1,3 +1,4 @@
+from tkinter import NO
 import streamlit as st
 import pandas as pd
 import json
@@ -5,6 +6,13 @@ import os
 import time
 import glob
 from pathlib import Path
+import asyncio
+import sys
+import streamlit.components.v1 as components
+
+# 在Windows上，为Playwright和Streamlit的兼容性设置事件循环策略
+if sys.platform == "win32":
+    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 import config # 导入根配置
 from btc_predictor.utils import LOGGER
@@ -37,24 +45,69 @@ def get_okx_data():
         st.error(f"加载OKX数据时出错: {e}")
         return None, None
 
+def get_latest_kline_png_from_cache():
+    import glob
+    import os
+    png_files = glob.glob(os.path.join("cache", "kline_chart_*.png"))
+    if not png_files:
+        return None, None
+    latest_file = max(png_files, key=os.path.getctime)
+    time_range = os.path.splitext(os.path.basename(latest_file))[0].replace("kline_chart_", "")
+    return latest_file, time_range
+
+def get_latest_kline_html_from_cache():
+    html_files = glob.glob(os.path.join("cache", "*.html"))
+    if not html_files:
+        return None, None
+    latest_file = max(html_files, key=os.path.getmtime)
+    time_range = os.path.splitext(os.path.basename(latest_file))[0].replace("kline_chart_", "")
+    return latest_file, time_range
+
 @st.cache_data(ttl=300)  # 缓存5分钟
-def get_latest_kline_data():
+def get_latest_kline_data() -> dict:
     """获取最新的K线数据和图表"""
+    # 优先从缓存图片获取
+    image_path, data_time_range = get_latest_kline_png_from_cache()
+    if image_path and os.path.exists(image_path):
+        bars = 48
+        if data_time_range:
+            try:
+                bars = int(data_time_range.split('_')[-1].replace('bars',''))
+            except Exception:
+                bars = 48
+        # 自动补全价格数据
+        current_price = price_change = price_change_pct = None
+        price_data = None
+        try:
+            price_data = get_data(symbol=DATA_CONFIG['symbol'], timeframe=DATA_CONFIG['timeframe'])
+            if price_data is not None and not price_data.empty:
+                price_data = price_data.tail(48)
+                current_price = float(price_data['close'].iloc[-1])
+                price_change = float(price_data['close'].iloc[-1] - price_data['close'].iloc[-2])
+                price_change_pct = float((price_data['close'].iloc[-1] - price_data['close'].iloc[-2]) / price_data['close'].iloc[-2] * 100)
+        except Exception as e:
+            LOGGER.error(f"补全价格数据失败: {e}")
+        return {
+            'price_data': price_data,
+            'image_path': image_path,
+            'data_time_range': data_time_range,
+            'current_price': current_price,
+            'price_change': price_change,
+            'price_change_pct': price_change_pct,
+            'bars': bars
+        }
+    # 如果没有缓存图片，才尝试生成
     try:
         # 获取价格数据
         full_price_data = get_data(
             symbol=DATA_CONFIG['symbol'], 
             timeframe=DATA_CONFIG['timeframe']
         )
-        
         if full_price_data is not None and not full_price_data.empty:
-            # 截取最后200个数据点用于技术指标
             price_data_for_ma = full_price_data.tail(200)
-            # 生成K线图（内部只显示最后48根）
             kline_result = create_kline_image(price_data_for_ma, save_dir="cache")
             if kline_result:
                 kline_image_path, data_time_range = kline_result
-                # 只显示最后48根K线的数据
                 price_data = price_data_for_ma.tail(48)
                 return {
                     'price_data': price_data,
@@ -62,11 +115,14 @@ def get_latest_kline_data():
                     'data_time_range': data_time_range,
                     'current_price': float(price_data['close'].iloc[-1]),
                     'price_change': float(price_data['close'].iloc[-1] - price_data['close'].iloc[-2]),
-                    'price_change_pct': float((price_data['close'].iloc[-1] - price_data['close'].iloc[-2]) / price_data['close'].iloc[-2] * 100)
+                    'price_change_pct': float((price_data['close'].iloc[-1] - price_data['close'].iloc[-2]) / price_data['close'].iloc[-2] * 100),
+                    'bars': len(price_data)
                 }
     except Exception as e:
         LOGGER.error(f"获取K线数据失败: {e}")
-        return None
+        return {'price_data': None, 'image_path': None, 'data_time_range': None, 'current_price': None, 'price_change': None, 'price_change_pct': None, 'bars': 48}
+    # 如果所有分支都未返回，补一个兜底dict
+    return {'price_data': None, 'image_path': None, 'data_time_range': None, 'current_price': None, 'price_change': None, 'price_change_pct': None, 'bars': 48}
 
 @st.cache_data(ttl=300)  # 缓存5分钟
 def get_quant_signal():
@@ -175,32 +231,20 @@ col1, col2 = st.columns([2, 1])
 
 with col1:
     st.subheader("📈 实时K线图表")
-    kline_data = get_latest_kline_data()
-    
-    if kline_data:
-        # 显示当前价格信息
-        price_cols = st.columns(3)
-        price_cols[0].metric(
-            "当前价格", 
-            f"${kline_data['current_price']:.2f}",
-            f"{kline_data['price_change']:+.2f} ({kline_data['price_change_pct']:+.2f}%)"
-        )
-        price_cols[1].metric("数据时间范围", kline_data['data_time_range'])
-        price_cols[2].metric("数据点数", "48 (2天)")
-        
-        # 显示K线图
-        if os.path.exists(kline_data['image_path']):
-            st.image(kline_data['image_path'], caption="BTC/USDT 2天K线图 (包含6h/12h/24h均线)", use_container_width=True)
+    # 只展示最新图片
+    image_path, image_time_range = get_latest_kline_png_from_cache()
+    if image_path and os.path.exists(image_path):
+        st.image(image_path, caption=f"BTC/USDT K线图（{image_time_range}）", use_container_width=True)
+        st.caption(f"时间范围: {image_time_range}")
         else:
             st.warning("K线图文件未找到")
             
         # 显示最新的价格数据表格
         with st.expander("📊 最新价格数据 (最后10根K线)"):
-            latest_data = kline_data['price_data'].tail(10).copy()
+            latest_data = get_latest_kline_data()['price_data'].tail(10).copy()
             latest_data.index = latest_data.index.strftime("%m-%d %H:%M")
             st.dataframe(latest_data[['open', 'high', 'low', 'close', 'volume']], use_container_width=True)
-    else:
-        st.error("无法获取K线数据，请检查数据源连接")
+
 
 with col2:
     st.subheader("🤖 VLM技术分析")
@@ -208,7 +252,7 @@ with col2:
     
     if vlm_analysis:
         st.success("✅ VLM分析可用")
-        with st.expander("🔍 查看完整VLM分析", expanded=True):
+        with st.expander("🔍 查看完整VLM分析", expanded=False):
             st.markdown(vlm_analysis)
     else:
         st.warning("⏳ 暂无VLM分析结果")

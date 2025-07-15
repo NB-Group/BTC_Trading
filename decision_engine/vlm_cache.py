@@ -26,7 +26,10 @@ class VLMCache:
         self.enabled = cache_config.get('enabled', True)
         
         if not self.enabled:
-            LOGGER.info("VLM缓存已禁用")
+            LOGGER.info("VLM缓存已禁用，自动清理所有缓存文件。")
+            for f in [self.tweet_cache_file, self.kline_cache_file]:
+                if f.exists():
+                    f.unlink()
             self.tweet_cache = {}
             self.kline_cache = {}
             return
@@ -41,6 +44,8 @@ class VLMCache:
         # 加载现有缓存
         self.tweet_cache = self._load_cache(self.tweet_cache_file)
         self.kline_cache = self._load_cache(self.kline_cache_file)
+        # 初始化时自动清理过期缓存
+        self.cleanup_expired_cache()
         
         LOGGER.info(f"VLM缓存管理器已初始化，缓存有效期: {self.cache_hours}小时")
 
@@ -58,6 +63,9 @@ class VLMCache:
 
     def _save_cache(self, cache_data: Dict[str, Any], cache_file: Path):
         """将缓存数据保存到文件。"""
+        if not self.enabled:
+            LOGGER.info(f"缓存禁用，未写入缓存文件 {cache_file}")
+            return
         try:
             with open(cache_file, 'w', encoding='utf-8') as f:
                 json.dump(cache_data, f, ensure_ascii=False, indent=2)
@@ -90,6 +98,7 @@ class VLMCache:
         """
         if not self.enabled:
             return None
+        self.cleanup_expired_cache()  # 每次访问前自动清理过期缓存
             
         # 生成内容标识：推文文本 + 媒体URL
         content_key = f"{tweet_text}|{media_url}"
@@ -117,7 +126,8 @@ class VLMCache:
             analysis: VLM分析结果
         """
         if not self.enabled:
-            return
+            LOGGER.info("缓存禁用，未写入推文分析缓存。"); return
+        self.cleanup_expired_cache()  # 每次写入前自动清理过期缓存
             
         content_key = f"{tweet_text}|{media_url}"
         content_hash = self._generate_content_hash(content_key)
@@ -144,6 +154,7 @@ class VLMCache:
         """
         if not self.enabled:
             return None
+        self.cleanup_expired_cache()  # 每次访问前自动清理过期缓存
             
         if data_hash in self.kline_cache:
             cache_entry = self.kline_cache[data_hash]
@@ -167,7 +178,8 @@ class VLMCache:
             analysis: VLM分析结果
         """
         if not self.enabled:
-            return
+            LOGGER.info("缓存禁用，未写入K线分析缓存。"); return
+        self.cleanup_expired_cache()  # 每次写入前自动清理过期缓存
             
         self.kline_cache[data_hash] = {
             'data_info': data_info,

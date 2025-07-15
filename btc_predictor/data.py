@@ -51,18 +51,20 @@ def get_exchange() -> Optional[ccxt.Exchange]:
         LOGGER.error(f"初始化ccxt交易所时发生错误: {e}")
         return None
 
-def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Optional[int] = None) -> pd.DataFrame:
+def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: int = 72) -> pd.DataFrame:
     """
     获取并缓存历史OHLCV数据。
     
-    这是主要的获取数据函数。它从 'since' 参数获取所有可用数据，更新缓存中的最新数据，并存储它。
+    这是主要的获取数据函数。
+    - 如果'since'未提供，它将只获取最新的'limit'条数据（默认为72）。
+    - 如果'since'提供了，它将获取从该时间点开始的所有可用数据，并更新缓存。
     
     参数：
         symbol (str): 交易符号 (例如: 'BTC/USDT')。
         timeframe (str): 时间框架 (例如: '1h')。
         since (str, optional): 开始日期字符串，格式为ISO 8601。 
-                               默认为 DATA_CONFIG['since']。
-        limit (int, optional): 此参数现在已忽略，因为函数获取所有可用数据，但保留以保持兼容性。
+                               如果未提供，将只获取最新数据。
+        limit (int, optional): 要获取的K线条数。默认为 72。
 
     返回：
         pd.DataFrame: 包含OHLCV数据的DataFrame，按时间戳索引。
@@ -96,8 +98,31 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: Op
             
     # --- 如果交易所初始化成功，则执行正常的在线数据获取流程 ---
     
+    # --- 新逻辑：根据 'since' 参数决定行为 ---
+    if since is None:
+        # --- 行为1: 'since' 未提供 - 只获取最新的 'limit' 条数据 ---
+        LOGGER.info(f"正在获取最新的 {limit} 条数据...")
+        try:
+            ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+            if not ohlcv:
+                LOGGER.error("无法从交易所获取最新数据。")
+                return pd.DataFrame()
+            
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            df.set_index('timestamp', inplace=True)
+            LOGGER.success(f"成功获取了 {len(df)} 条最新数据。")
+            return df
+
+        except Exception as e:
+            LOGGER.error(f"获取最新数据时发生错误: {e}", exc_info=True)
+            return pd.DataFrame()
+
+    # --- 行为2: 'since' 已提供 - 执行完整的历史数据获取和缓存更新 ---
+    LOGGER.info(f"参数 'since' 已提供。将执行完整的历史数据获取与缓存更新流程...")
+    
     # 使用提供的 'since' 或 fallback 到配置
-    since_str = since if since is not None else str(DATA_CONFIG.get('since', '2017-01-01T00:00:00Z'))
+    since_str = since
     start_timestamp = exchange.parse8601(since_str)
     
     df = pd.DataFrame()

@@ -70,7 +70,7 @@ MACRO_ECONOMIC_KEYWORDS = [
 # ==============================================================================
 VLM_CACHE = {
     'enabled': True,           # 是否启用缓存
-    'cache_hours': 4,          # 缓存有效期（小时）
+    'cache_hours': 1,          # 缓存有效期（小时）
     'cache_dir': 'cache'       # 缓存目录
 }
 
@@ -102,4 +102,5 @@ FUTURES = {
     'trade_symbol': 'BTC-USDT-SWAP', # 期货交易对 (永续合约)
     'leverage': 2,                   # 默认杠杆倍数 (降低风险)
     'margin_mode': 'isolated',       # 保证金模式: 'isolated' (逐仓) or 'cross' (全仓)
+    'hedge_mode': False,             # 是否为双向持仓（hedge），False为单向持仓
 } 
