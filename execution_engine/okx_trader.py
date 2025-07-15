@@ -210,15 +210,36 @@ class OKXTrader:
                     return
                 
                 pos_amount_str = position_info.get('pos')
-                if not pos_amount_str:
-                    LOGGER.error("无法从仓位信息中获取持仓数量 ('pos')。平仓操作取消。")
-                    return
-
-                amount = float(pos_amount_str)
+                contracts = position_info.get('contracts')
+                # 判断持仓模式
+                if current_pos_side == 'net':
+                    # 单向持仓，amount用BTC数量
+                    if pos_amount_str is None:
+                        LOGGER.error("无法从仓位信息中获取持仓数量 ('pos')。平仓操作取消。")
+                        return
+                    amount = float(pos_amount_str)
+                    LOGGER.info(f"准备平仓: {decision} {amount} BTC {self.trade_symbol} (net模式)...")
+                else:
+                    # 双向持仓，amount用张数
+                    if contracts is not None and pos_amount_str is not None and float(contracts) > 0:
+                        amount = int(float(contracts))
+                        btc_amount = float(pos_amount_str)
+                    elif pos_amount_str is not None:
+                        btc_amount = float(pos_amount_str)
+                        ticker = self.exchange.fetch_ticker(self.trade_symbol)
+                        mark_price = ticker.get('last')
+                        if mark_price is None:
+                            LOGGER.error("无法获取当前价格，无法计算平仓张数。平仓操作取消。")
+                            return
+                        mark_price = float(mark_price)
+                        contract_value = 100
+                        amount = max(1, round(btc_amount * mark_price / contract_value))
+                    else:
+                        LOGGER.error("无法从仓位信息中获取持仓数量 ('pos'/'contracts')。平仓操作取消。")
+                        return
+                    LOGGER.info(f"准备平仓: {decision} {amount}张 {self.trade_symbol} (约{btc_amount}BTC)...")
                 side = 'sell' if current_pos_side == 'long' else 'buy'
-
-                LOGGER.info(f"准备平仓: {decision} {amount} {self.trade_symbol}...")
-                order_params = {'tdMode': self.margin_mode}
+                order_params = {'tdMode': self.margin_mode, 'reduceOnly': True}
                 if self.hedge_mode:
                     order_params['posSide'] = current_pos_side
                 order = self.exchange.create_order(

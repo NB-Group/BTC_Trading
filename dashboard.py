@@ -236,14 +236,14 @@ with col1:
     if image_path and os.path.exists(image_path):
         st.image(image_path, caption=f"BTC/USDT K线图（{image_time_range}）", use_container_width=True)
         st.caption(f"时间范围: {image_time_range}")
-        else:
-            st.warning("K线图文件未找到")
+    else:
+        st.warning("K线图文件未找到")
             
-        # 显示最新的价格数据表格
-        with st.expander("📊 最新价格数据 (最后10根K线)"):
-            latest_data = get_latest_kline_data()['price_data'].tail(10).copy()
-            latest_data.index = latest_data.index.strftime("%m-%d %H:%M")
-            st.dataframe(latest_data[['open', 'high', 'low', 'close', 'volume']], use_container_width=True)
+    # 显示最新的价格数据表格
+    with st.expander("📊 最新价格数据 (最后10根K线)"):
+        latest_data = get_latest_kline_data()['price_data'].tail(10).copy()
+        latest_data.index = latest_data.index.strftime("%m-%d %H:%M")
+        st.dataframe(latest_data[['open', 'high', 'low', 'close', 'volume']], use_container_width=True)
 
 
 with col2:

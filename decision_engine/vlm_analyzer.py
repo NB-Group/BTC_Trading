@@ -6,6 +6,7 @@ import mimetypes
 from typing import List, Dict, Any, Optional
 import json # 添加用于详细错误日志记录
 import hashlib # 添加用于K线图缓存哈希
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 import config
 from btc_predictor.utils import LOGGER
@@ -78,7 +79,7 @@ class VLMAnalyzer:
                 {"type": "text", "text": prompt_text},
                 {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_media}"}}
             ]}],
-            "max_tokens": 500 # 为K线图分析增加token上限
+            "max_tokens": 2000 # 为K线图分析增加token上限
         }
 
         try:
@@ -86,7 +87,7 @@ class VLMAnalyzer:
             LOGGER.debug(f"VLM API URL: {self.api_url}")
             LOGGER.debug(f"Payload size: {len(json.dumps(payload))} chars")
             
-            response = self.session.post(self.api_url, headers=headers, json=payload, timeout=120)
+            response = self.post_with_retry(self.api_url, headers=headers, json=payload, timeout=120)
             
             LOGGER.info(f"VLM API响应状态码: {response.status_code}")
             
@@ -131,6 +132,10 @@ class VLMAnalyzer:
         except (KeyError, IndexError) as e:
             LOGGER.error(f"解析VLM API响应失败: {e}")
             return "解析VLM API响应失败。"
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    def post_with_retry(self, url, headers, json, timeout):
+        return self.session.post(url, headers=headers, json=json, timeout=timeout)
 
     def analyze_media(self, media_url: str, tweet_text: str, is_video: bool = False) -> Optional[str]:
         """分析来自推文的在线媒体（图片/视频），使用7B模型，支持缓存。"""
