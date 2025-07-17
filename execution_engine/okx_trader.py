@@ -6,6 +6,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 import config
 from btc_predictor.utils import LOGGER
+from utils.email_notifier import EmailNotifier
 
 class OKXTrader:
     """
@@ -43,6 +44,9 @@ class OKXTrader:
             LOGGER.info(f"OKX Trader 已初始化 (模拟盘模式) - 交易对: {self.trade_symbol}")
         else:
             LOGGER.info(f"OKX Trader 已初始化 (实盘模式) - 交易对: {self.trade_symbol}")
+
+        # 初始化邮件通知器
+        self.email_notifier = EmailNotifier()
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
     def get_position(self) -> Optional[Dict[str, Any]]:
@@ -256,8 +260,10 @@ class OKXTrader:
 
         except (ccxt.NetworkError, ccxt.ExchangeError) as e:
             LOGGER.error("执行交易决策时发生交易所错误: {}", e, exc_info=True)
+            self.email_notifier.send_error_notification("OKX交易所错误", str(e))
         except Exception as e:
             LOGGER.error("执行交易决策时发生未知错误: {}", e, exc_info=True)
+            self.email_notifier.send_error_notification("OKX交易器未知错误", str(e))
 
     def _set_stop_orders(self, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str):
         """
@@ -337,6 +343,7 @@ class OKXTrader:
                     LOGGER.info(f"止盈订单已设置: 价格 ${take_profit_price:.2f}")
         except Exception as e:
             LOGGER.error("设置止损/止盈订单时发生错误: {}", e)
+            self.email_notifier.send_error_notification("止盈止损设置错误", str(e))
 
     def get_balance(self, currency: str = 'USDT'):
         """
