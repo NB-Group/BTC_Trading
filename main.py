@@ -15,6 +15,7 @@ from data_ingestion.news_feeds import fetch_coindesk_news
 from decision_engine.vlm_analyzer import VLMAnalyzer
 from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
 from execution_engine.okx_trader import OKXTrader
+from utils.email_notifier import EmailNotifier
 
 def save_decision_report(report: Dict[str, Any]):
     """将决策报告保存到文件。"""
@@ -121,6 +122,10 @@ def run_trading_cycle(skip_llm: bool = False):
     运行一个完整的交易决策周期。
     """
     LOGGER.info("========== 开始新一轮决策周期 ==========")
+    
+    # 初始化邮件通知器
+    email_notifier = EmailNotifier()
+    
     try:
         # ======================================================================
         # 步骤 1: 获取多时间框架数据和信号
@@ -250,11 +255,41 @@ def run_trading_cycle(skip_llm: bool = False):
                 elif k == "suggested_trade_size":
                     final_decision["suggested_trade_size"] = float(0.95)
         LOGGER.info(f"最终用于交易执行的决策数据: {final_decision}")
-        trader.execute_decision(final_decision)
+        
+        # 执行交易决策
+        try:
+            trader.execute_decision(final_decision)
+            # 发送成功通知邮件
+            email_notifier.send_decision_notification(final_decision, execution_success=True)
+        except Exception as e:
+            error_msg = f"交易执行失败: {str(e)}"
+            LOGGER.error(error_msg)
+            # 发送失败通知邮件
+            email_notifier.send_decision_notification(final_decision, execution_success=False, error_msg=error_msg)
+            # 同时发送错误通知邮件
+            email_notifier.send_error_notification(
+                "交易执行错误", 
+                error_msg, 
+                context={
+                    "decision": final_decision.get("decision"),
+                    "confidence": final_decision.get("confidence"),
+                    "trade_params": str(final_decision.get("trade_params"))
+                }
+            )
 
     except Exception as e:
         import traceback
-        LOGGER.critical("交易周期主循环发生严重错误: {}\n详细traceback:\n{}", repr(e), traceback.format_exc(), exc_info=True)
+        error_msg = f"交易周期主循环发生严重错误: {repr(e)}"
+        LOGGER.critical(f"{error_msg}\n详细traceback:\n{traceback.format_exc()}", exc_info=True)
+        
+        # 发送系统错误通知邮件
+        email_notifier.send_error_notification(
+            "系统错误", 
+            error_msg, 
+            context={
+                "traceback": traceback.format_exc()[:500] + "..." if len(traceback.format_exc()) > 500 else traceback.format_exc()
+            }
+        )
     finally:
         LOGGER.info("========== 本轮决策周期结束 ==========\n")
         _save_last_run_timestamp()

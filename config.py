@@ -11,6 +11,17 @@ load_dotenv()
 # 交易设置
 DEMO_MODE = os.getenv('DEMO_MODE', 'true').lower() == 'true'
 
+# Email Configuration
+EMAIL_CONFIG = {
+    'enabled': os.getenv('EMAIL_ENABLED', 'false').lower() == 'true',
+    'smtp_server': os.getenv('EMAIL_SMTP_SERVER', 'smtp.qq.com'),
+    'smtp_port': int(os.getenv('EMAIL_SMTP_PORT', '587')),
+    'from_email': os.getenv('EMAIL_FROM', ''),
+    'to_email': os.getenv('EMAIL_TO', ''),
+    'auth_code': os.getenv('EMAIL_AUTH_CODE', ''),
+    'use_tls': os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
+}
+
 # ----------------- Defaults -----------------
 DEFAULTS = {
     'proxy_url': os.getenv('PROXY_URL'),  # 代理地址，如果不需要则设为 None
