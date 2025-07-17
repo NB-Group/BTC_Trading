@@ -31,10 +31,10 @@ class VLMAnalyzer:
             self.api_key = None
 
         self.session = requests.Session()
-        proxy_url = config.DEFAULTS.get('proxy_url')
-        if proxy_url:
-            self.session.proxies = {'http': proxy_url, 'https': proxy_url}
-            LOGGER.info(f"VLMAnalyzer 已配置代理: {proxy_url}")
+        # proxy_url = config.DEFAULTS.get('proxy_url')
+        # if proxy_url:
+        #     self.session.proxies = {'http': proxy_url, 'https': proxy_url}
+        #     LOGGER.info(f"VLMAnalyzer 已配置代理: {proxy_url}")
 
         # 初始化缓存管理器（使用配置文件设置）
         self.cache = VLMCache()

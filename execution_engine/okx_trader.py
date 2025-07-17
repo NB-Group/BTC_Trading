@@ -265,71 +265,76 @@ class OKXTrader:
         """
         try:
             # 确保entry_price是float类型
+            LOGGER.info(f"[止盈止损] entry_price={entry_price}, params={params}, pos_side={pos_side}, main_order={main_order}")
+            if entry_price is None:
+                LOGGER.error("entry_price为None，无法设置止盈止损单。直接返回。")
+                return
             entry_price = float(entry_price)
-            
             stop_loss_pct = params.get('stop_loss_pct')
             take_profit_pct = params.get('take_profit_pct')
-            
+            # 先检查main_order['amount']
+            amount = main_order.get('amount') if isinstance(main_order, dict) else getattr(main_order, 'amount', None)
+            if amount is None:
+                LOGGER.error("main_order['amount']为None，无法设置止盈止损单。直接返回。main_order={}".format(main_order))
+                return
+            amount = float(amount)
+            amount = round(amount, 4)
+            stop_loss_price = None
+            take_profit_price = None
             if stop_loss_pct:
-                # 计算止损价格
                 if pos_side == 'long':
                     stop_loss_price = entry_price * (1 - stop_loss_pct / 100)
                 else:
                     stop_loss_price = entry_price * (1 + stop_loss_pct / 100)
-                
-                # 创建止损订单
-                stop_order_params = {
-                    'tdMode': self.margin_mode,
-                    'stopPrice': stop_loss_price
-                }
-                if self.hedge_mode:
-                    stop_order_params['posSide'] = pos_side
-                # 创建止损订单
-                amount = float(main_order['amount'])
-                amount = round(amount, 4)
-                LOGGER.info(f"提交止损单，数量: {amount}, 类型: {type(amount)}")
-                stop_order = self.exchange.create_order(
-                    symbol=self.trade_symbol,
-                    type='market',
-                    side='sell' if pos_side == 'long' else 'buy',
-                    amount=amount,
-                    params=stop_order_params
-                )
-                if isinstance(stop_order, dict) and 'code' in stop_order:
-                    LOGGER.error("止损单下单失败，返回错误: {}", stop_order)
-                    raise RuntimeError(f"止损单下单失败: {stop_order}")
-                LOGGER.info(f"止损订单已设置: 价格 ${stop_loss_price:.2f}")
-            
+                LOGGER.info(f"[止损] stop_loss_pct={stop_loss_pct}, stop_loss_price={stop_loss_price}")
+                if stop_loss_price is None:
+                    LOGGER.error("stop_loss_price为None，跳过止损单下单。")
+                else:
+                    stop_order_params = {
+                        'tdMode': self.margin_mode,
+                        'stopPrice': stop_loss_price
+                    }
+                    if self.hedge_mode:
+                        stop_order_params['posSide'] = pos_side
+                    LOGGER.info(f"提交止损单，数量: {amount}, 类型: {type(amount)}")
+                    stop_order = self.exchange.create_order(
+                        symbol=self.trade_symbol,
+                        type='market',
+                        side='sell' if pos_side == 'long' else 'buy',
+                        amount=amount,
+                        params=stop_order_params
+                    )
+                    if isinstance(stop_order, dict) and 'code' in stop_order:
+                        LOGGER.error("止损单下单失败，返回错误: {}", stop_order)
+                        raise RuntimeError(f"止损单下单失败: {stop_order}")
+                    LOGGER.info(f"止损订单已设置: 价格 ${stop_loss_price:.2f}")
             if take_profit_pct:
-                # 计算止盈价格
                 if pos_side == 'long':
                     take_profit_price = entry_price * (1 + take_profit_pct / 100)
                 else:
                     take_profit_price = entry_price * (1 - take_profit_pct / 100)
-                
-                # 创建止盈订单
-                take_profit_order_params = {
-                    'tdMode': self.margin_mode
-                }
-                if self.hedge_mode:
-                    take_profit_order_params['posSide'] = pos_side
-                # 创建止盈订单
-                amount = float(main_order['amount'])
-                amount = round(amount, 4)
-                LOGGER.info(f"提交止盈单，数量: {amount}, 类型: {type(amount)}")
-                take_profit_order = self.exchange.create_order(
-                    symbol=self.trade_symbol,
-                    type='limit',
-                    side='sell' if pos_side == 'long' else 'buy',
-                    amount=amount,
-                    price=take_profit_price,
-                    params=take_profit_order_params
-                )
-                if isinstance(take_profit_order, dict) and 'code' in take_profit_order:
-                    LOGGER.error("止盈单下单失败，返回错误: {}", take_profit_order)
-                    raise RuntimeError(f"止盈单下单失败: {take_profit_order}")
-                LOGGER.info(f"止盈订单已设置: 价格 ${take_profit_price:.2f}")
-                
+                LOGGER.info(f"[止盈] take_profit_pct={take_profit_pct}, take_profit_price={take_profit_price}")
+                if take_profit_price is None:
+                    LOGGER.error("take_profit_price为None，跳过止盈单下单。")
+                else:
+                    take_profit_order_params = {
+                        'tdMode': self.margin_mode
+                    }
+                    if self.hedge_mode:
+                        take_profit_order_params['posSide'] = pos_side
+                    LOGGER.info(f"提交止盈单，数量: {amount}, 类型: {type(amount)}")
+                    take_profit_order = self.exchange.create_order(
+                        symbol=self.trade_symbol,
+                        type='limit',
+                        side='sell' if pos_side == 'long' else 'buy',
+                        amount=amount,
+                        price=take_profit_price,
+                        params=take_profit_order_params
+                    )
+                    if isinstance(take_profit_order, dict) and 'code' in take_profit_order:
+                        LOGGER.error("止盈单下单失败，返回错误: {}", take_profit_order)
+                        raise RuntimeError(f"止盈单下单失败: {take_profit_order}")
+                    LOGGER.info(f"止盈订单已设置: 价格 ${take_profit_price:.2f}")
         except Exception as e:
             LOGGER.error("设置止损/止盈订单时发生错误: {}", e)
 

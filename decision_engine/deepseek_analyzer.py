@@ -188,13 +188,25 @@ class DeepSeekAnalyzer:
     - 如果`所需杠杆` > 5 (最大允许杠杆)，则最终决策必须是 `HOLD`，并在 `reasoning` 中明确指出“因资金不足，即使5倍杠杆也无法满足最小开仓量，故放弃交易”。
     - 否则，在 `trade_params` 中必须使用计算出的`所需杠杆`。
 - **持仓优先**: 你的最终决策必须与当前持仓状态逻辑一致。
+- **操作含义说明**:
+  - `LONG`：开多仓（买入做多）
+  - `SHORT`：开空仓（卖出做空）
+  - `HOLD`：观望，不操作
+  - `CLOSE_LONG`：平掉多仓（卖出已持有的多仓）
+  - `CLOSE_SHORT`：平掉空仓（买入已持有的空仓）
+- **持仓方向判断规则**:
+  - 如果 `posSide` 字段为 `net`，则根据 `pos` 数值判断方向：`pos > 0` 为多仓，`pos < 0` 为空仓。
+  - 只有持有多仓时才允许 `CLOSE_LONG`，只有持有空仓时才允许 `CLOSE_SHORT`。
+  - 如果当前无持仓，则不允许返回 `CLOSE_LONG` 或 `CLOSE_SHORT`，只能返回 `HOLD`。
+  - 如果建议的平仓方向与实际持仓方向不符，必须返回 `HOLD`，并在 reasoning 里说明原因。
 - **关键信号优先**: 如果发现任何"大海捞针"类型的关键信号，必须在reasoning中明确提及并重点分析。
 - **时效性**: 信息具有极强的时效性，优先考虑最新发布的情报。
 - **信号冲突处理**: 如果关键风险信号与量化模型信号冲突，关键风险信号具有优先权。
 - **风险管理**: 如果市场信息极度混乱或出现重大不确定性，且有持仓，首选是平仓(`CLOSE_LONG`/`CLOSE_SHORT`)；如果空仓，则决策为`HOLD`。
 - **JSON输出**: 必须严格按照指定的JSON格式输出，不要包含任何额外说明或```json```标记。
-- **内部量化模型信号**: 其依赖于MA60与k线的交叉信号，如果没有，均输出HOLD，因此其输出HOLD时，不得作为任何决策的依据，在其做出决策时，你要加大其在判断中的权重。
+- **内部量化模型信号**: 其依赖于MA60与k线的交叉信号，如果没有，均输出HOLD，因此其输出HOLD时，不得作为任何决策的依据，在其做出除HOLD以外的决策时，你要加大其在判断中的权重。
 - **短线盈利优先**: 只要VLM技术分析显示短线盈利机会（1H K线），就优先考虑短线盈利机会，忽略长期金融市场趋势。
+- **如果持有仓位与长期方向相同，但与短期方向相反，在盈利时可以平仓，但不盈利时建议继续持有，总之就是慎防亏损最多的时候卖出。**
 
 # 当前市场状态
 - **分析时间**: {current_time_utc}
@@ -299,21 +311,33 @@ class DeepSeekAnalyzer:
             return position_part
 
         side = position_data.get('posSide')
-        qty = position_data.get('posCcy') # 使用posCcy获取以BTC为单位的数量
+        qty = position_data.get('posCcy') or position_data.get('pos')  # 兼容性
         avg_price = position_data.get('avgPx')
         unrealized_pnl = position_data.get('upl')
         leverage = position_data.get('lever')
 
-        if side == 'long':
+        # 新增net模式判断
+        if side == 'net':
+            try:
+                pos_val = float(position_data.get('pos', 0))
+            except Exception:
+                pos_val = 0
+            if pos_val > 0:
+                position_part += f"- **持仓方向**: **做多 (LONG, net模式, pos={pos_val})**\n"
+            elif pos_val < 0:
+                position_part += f"- **持仓方向**: **做空 (SHORT, net模式, pos={pos_val})**\n"
+            else:
+                position_part += "当前 **空仓**。\n"
+                return position_part
+        elif side == 'long':
             position_part += f"- **持仓方向**: **做多 (LONG)**\n"
         elif side == 'short':
             position_part += f"- **持仓方向**: **做空 (SHORT)**\n"
-        
+
         position_part += f"- **持仓数量**: {qty} BTC\n"
         position_part += f"- **开仓均价**: ${avg_price}\n"
         position_part += f"- **杠杆倍数**: {leverage}x\n"
         position_part += f"- **未实现盈亏**: **${unrealized_pnl}**\n"
-        
         return position_part
 
     def _format_balance_info(self, balance: Optional[float]) -> str:
