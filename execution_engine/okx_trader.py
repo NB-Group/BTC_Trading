@@ -186,7 +186,8 @@ class OKXTrader:
                 # 设置止损和止盈订单（如果提供了百分比参数）
                 if 'stop_loss_pct' in params or 'take_profit_pct' in params:
                     if current_price is not None:
-                        self._set_stop_orders(order, float(current_price), params, pos_side)
+                        # 使用下单时的amount参数，而不是order中的amount（市价单为None）
+                        self._set_stop_orders(order, float(current_price), params, pos_side, amount)
 
             # 如果需要平仓 (CLOSE_LONG or CLOSE_SHORT)
             elif decision in ['CLOSE_LONG', 'CLOSE_SHORT']:
@@ -265,25 +266,38 @@ class OKXTrader:
             LOGGER.error("执行交易决策时发生未知错误: {}", e, exc_info=True)
             self.email_notifier.send_error_notification("OKX交易器未知错误", str(e))
 
-    def _set_stop_orders(self, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str):
+    def _set_stop_orders(self, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str, order_amount: float = None):
         """
         设置止损和止盈订单。
+        
+        Args:
+            main_order: 主订单对象
+            entry_price: 入场价格
+            params: 交易参数
+            pos_side: 持仓方向
+            order_amount: 订单数量（用于市价单，因为市价单的amount字段为None）
         """
         try:
             # 确保entry_price是float类型
-            LOGGER.info(f"[止盈止损] entry_price={entry_price}, params={params}, pos_side={pos_side}, main_order={main_order}")
+            LOGGER.info(f"[止盈止损] entry_price={entry_price}, params={params}, pos_side={pos_side}, order_amount={order_amount}")
             if entry_price is None:
                 LOGGER.error("entry_price为None，无法设置止盈止损单。直接返回。")
                 return
+            
             entry_price = float(entry_price)
             stop_loss_pct = params.get('stop_loss_pct')
             take_profit_pct = params.get('take_profit_pct')
-            # 先检查main_order['amount']
-            amount = main_order.get('amount') if isinstance(main_order, dict) else getattr(main_order, 'amount', None)
-            if amount is None:
-                LOGGER.error("main_order['amount']为None，无法设置止盈止损单。直接返回。main_order={}".format(main_order))
-                return
-            amount = float(amount)
+            
+            # 优先使用传入的order_amount，如果没有则尝试从main_order获取
+            if order_amount is not None:
+                amount = float(order_amount)
+            else:
+                amount = main_order.get('amount') if isinstance(main_order, dict) else getattr(main_order, 'amount', None)
+                if amount is None:
+                    LOGGER.error("无法获取订单数量，无法设置止盈止损单。main_order={}, order_amount={}".format(main_order, order_amount))
+                    return
+                amount = float(amount)
+            
             amount = round(amount, 4)
             stop_loss_price = None
             take_profit_price = None
