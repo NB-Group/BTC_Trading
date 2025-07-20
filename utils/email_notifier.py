@@ -29,20 +29,23 @@ class EmailNotifier:
             
         LOGGER.info(f"邮件通知器已初始化，发件人: {self.config['from_email']}")
 
-    def send_decision_notification(self, decision_data: Dict[str, Any], execution_success: bool = True, error_msg: str = None):
+    def send_decision_notification(self, decision_data: Dict[str, Any], execution_success: bool = True, error_msg: str = None, process_status: Dict[str, Any] = None):
         """发送交易决策通知"""
         if not self.enabled:
             return
             
         try:
             subject = self._get_decision_subject(decision_data, execution_success)
-            html_content = self._create_decision_email_html(decision_data, execution_success, error_msg)
+            html_content = self._create_decision_email_html(decision_data, execution_success, error_msg, process_status)
             
             self._send_email(subject, html_content)
             LOGGER.info("交易决策邮件通知已发送")
             
         except Exception as e:
-            LOGGER.error(f"发送交易决策邮件失败: {e}")
+            if (str(e) == "(-1, b'\x00\x00\x00')"):
+                LOGGER.info("发送交易决策邮件成功")
+            else:
+                LOGGER.error(f"发送交易决策邮件失败: {e}")
 
     def send_error_notification(self, error_type: str, error_msg: str, context: Dict[str, Any] = None):
         """发送错误通知"""
@@ -57,7 +60,10 @@ class EmailNotifier:
             LOGGER.info("错误通知邮件已发送")
             
         except Exception as e:
-            LOGGER.error(f"发送错误通知邮件失败: {e}")
+            if (str(e) == "(-1, b'\x00\x00\x00')"):
+                LOGGER.info("发送错误通知邮件成功")
+            else:
+                LOGGER.error(f"发送错误通知邮件失败: {e}")
 
     def _get_decision_subject(self, decision_data: Dict[str, Any], execution_success: bool) -> str:
         """生成邮件主题"""
@@ -74,7 +80,7 @@ class EmailNotifier:
         else:
             return f"❌ BTC交易执行失败 - {decision} ({current_time})"
 
-    def _create_decision_email_html(self, decision_data: Dict[str, Any], execution_success: bool, error_msg: str = None) -> str:
+    def _create_decision_email_html(self, decision_data: Dict[str, Any], execution_success: bool, error_msg: str = None, process_status: Dict[str, Any] = None) -> str:
         """创建决策邮件的HTML内容"""
         decision = decision_data.get('decision', 'UNKNOWN').upper()
         confidence = decision_data.get('confidence', 0)
@@ -271,6 +277,10 @@ class EmailNotifier:
                     </div>
         """
         
+        # 添加流程运行状态部分
+        if process_status:
+            html += self._create_process_status_html(process_status)
+        
         if error_msg:
             html += f"""
                     <div class="error-section">
@@ -289,6 +299,84 @@ class EmailNotifier:
             </div>
         </body>
         </html>
+        """
+        
+        return html
+
+    def _create_process_status_html(self, process_status: Dict[str, Any]) -> str:
+        """创建流程运行状态的HTML内容"""
+        html = """
+                    <div class="section">
+                        <h3>🔧 流程运行状态</h3>
+        """
+        
+        # 流程状态映射
+        status_icons = {
+            'success': '✅',
+            'error': '❌',
+            'warning': '⚠️',
+            'info': 'ℹ️',
+            'pending': '⏳'
+        }
+        
+        # 流程顺序
+        process_order = [
+            'data_collection',
+            'vlm_analysis', 
+            'news_intelligence',
+            'llm_decision',
+            'trade_execution'
+        ]
+        
+        for process_key in process_order:
+            if process_key in process_status:
+                process_info = process_status[process_key]
+                status = process_info.get('status', 'pending')
+                icon = status_icons.get(status, '❓')
+                
+                # 流程名称映射
+                process_names = {
+                    'data_collection': '数据获取',
+                    'vlm_analysis': 'VLM技术分析',
+                    'news_intelligence': '新闻情报收集',
+                    'llm_decision': 'LLM决策分析',
+                    'trade_execution': '交易执行'
+                }
+                
+                process_name = process_names.get(process_key, process_key)
+                duration = process_info.get('duration', 'N/A')
+                message = process_info.get('message', '')
+                error = process_info.get('error', '')
+                
+                # 状态颜色
+                status_colors = {
+                    'success': '#28a745',
+                    'error': '#dc3545', 
+                    'warning': '#ffc107',
+                    'info': '#17a2b8',
+                    'pending': '#6c757d'
+                }
+                status_color = status_colors.get(status, '#6c757d')
+                
+                html += f"""
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid {status_color};">
+                            <div style="display: flex; align-items: center; margin-bottom: 8px;">
+                                <span style="font-size: 18px; margin-right: 10px;">{icon}</span>
+                                <strong style="color: #495057;">{process_name}</strong>
+                                <span style="margin-left: auto; color: {status_color}; font-size: 12px;">{duration}</span>
+                            </div>
+                """
+                
+                if message:
+                    html += f'<div style="color: #6c757d; font-size: 14px; margin-left: 28px;">{message}</div>'
+                
+                if error:
+                    html += f'<div style="color: #dc3545; font-size: 14px; margin-left: 28px; margin-top: 5px;">❌ {error}</div>'
+                
+                html += "</div>"
+        
+        html += """
+                    </div>
         """
         
         return html

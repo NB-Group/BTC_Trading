@@ -132,38 +132,70 @@ def run_trading_cycle(skip_llm: bool = False):
     # 初始化邮件通知器
     email_notifier = EmailNotifier()
     
+    # 初始化流程状态跟踪器
+    process_status = {}
+    
+    def track_process(process_name: str, func, *args, **kwargs):
+        """跟踪流程执行状态"""
+        import time
+        start_time = time.time()
+        
+        try:
+            result = func(*args, **kwargs)
+            duration = f"{time.time() - start_time:.1f}s"
+            process_status[process_name] = {
+                'status': 'success',
+                'duration': duration,
+                'message': '执行成功'
+            }
+            return result
+        except Exception as e:
+            duration = f"{time.time() - start_time:.1f}s"
+            process_status[process_name] = {
+                'status': 'error',
+                'duration': duration,
+                'message': '执行失败',
+                'error': str(e)
+            }
+            raise
+    
     try:
         # ======================================================================
         # 步骤 1: 获取多时间框架数据和信号
         # ======================================================================
         LOGGER.info("="*50 + "\n步骤 1: 获取多时间框架数据和信号")
         
-        from btc_predictor.data import get_data
-        from btc_predictor.config import DATA_CONFIG
+        def collect_data():
+            from btc_predictor.data import get_data
+            from btc_predictor.config import DATA_CONFIG
+            
+            # 获取主要时间框架数据 (例如 1h)
+            short_term_data = get_data(
+                symbol=cast(str, DATA_CONFIG['symbol']), 
+                timeframe=cast(str, DATA_CONFIG['timeframe'])
+            )
+            # 获取日线数据
+            daily_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1d')
+            # 获取周线数据
+            weekly_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1w')
+
+            price_data_for_ma = short_term_data.tail(200) if short_term_data is not None and not short_term_data.empty else None
+
+            quant_signal_data = get_live_trade_signal(
+                model_name=cast(str, config.DEFAULTS['model_name'])
+            )
+            if quant_signal_data is None:
+                LOGGER.error("无法获取量化信号，将使用默认的HOLD信号继续。")
+                quant_signal_data = {
+                    "signal": "HOLD",
+                    "predicted_return": 0.0,
+                    "info": "信号获取失败"
+                }
+            LOGGER.info(f"获取到量化模型信号: {quant_signal_data}")
+            
+            return short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signal_data
         
-        # 获取主要时间框架数据 (例如 1h)
-        short_term_data = get_data(
-            symbol=cast(str, DATA_CONFIG['symbol']), 
-            timeframe=cast(str, DATA_CONFIG['timeframe'])
-        )
-        # 获取日线数据
-        daily_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1d')
-        # 获取周线数据
-        weekly_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1w')
-
-        price_data_for_ma = short_term_data.tail(200) if short_term_data is not None and not short_term_data.empty else None
-
-        quant_signal_data = get_live_trade_signal(
-            model_name=cast(str, config.DEFAULTS['model_name'])
-        )
-        if quant_signal_data is None:
-            LOGGER.error("无法获取量化信号，将使用默认的HOLD信号继续。")
-            quant_signal_data = {
-                "signal": "HOLD",
-                "predicted_return": 0.0,
-                "info": "信号获取失败"
-            }
-        LOGGER.info(f"获取到量化模型信号: {quant_signal_data}")
+        short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data)
 
         # ======================================================================
         # 步骤 2: 初始化VLM分析器（仅用于K线图）
@@ -179,15 +211,19 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         LOGGER.info("="*50 + "\n步骤 3: 生成并分析多时间框架的K线图")
         
-        short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
-        daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data.tail(200) if daily_data is not None else None, "Daily", "1d")
-        weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data.tail(100) if weekly_data is not None else None, "Weekly", "1w")
+        def perform_vlm_analysis():
+            short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
+            daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data.tail(200) if daily_data is not None else None, "Daily", "1d")
+            weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data.tail(100) if weekly_data is not None else None, "Weekly", "1w")
+            return short_term_analysis, daily_analysis, weekly_analysis
+        
+        short_term_analysis, daily_analysis, weekly_analysis = track_process('vlm_analysis', perform_vlm_analysis)
 
         # ======================================================================
         # 步骤 4: 获取市场新闻情报
         # ======================================================================
         LOGGER.info("="*50 + "\n步骤 4: 获取市场新闻情报")
-        market_news = get_market_intelligence()
+        market_news = track_process('news_intelligence', get_market_intelligence)
 
         # ======================================================================
         # 步骤 5: LLM决策引擎
@@ -207,19 +243,27 @@ def run_trading_cycle(skip_llm: bool = False):
                 "trade_params": {},
                 "suggested_trade_size": 0.95
             }
+            process_status['llm_decision'] = {
+                'status': 'info',
+                'duration': '0.0s',
+                'message': '跳过LLM分析'
+            }
         else:
-            analyzer = DeepSeekAnalyzer()
-            final_decision = analyzer.get_trade_decision(
-                quant_signal=quant_signal_data,
-                twitter_data=market_news, 
-                kline_analysis={
-                    "short_term": short_term_analysis,
-                    "daily": daily_analysis,
-                    "weekly": weekly_analysis
-                },
-                current_position=current_position,
-                current_balance=current_balance
-            )
+            def perform_llm_decision():
+                analyzer = DeepSeekAnalyzer()
+                return analyzer.get_trade_decision(
+                    quant_signal=quant_signal_data,
+                    twitter_data=market_news, 
+                    kline_analysis={
+                        "short_term": short_term_analysis,
+                        "daily": daily_analysis,
+                        "weekly": weekly_analysis
+                    },
+                    current_position=current_position,
+                    current_balance=current_balance
+                )
+            
+            final_decision = track_process('llm_decision', perform_llm_decision)
 
         # ======================================================================
         # 步骤 6: 保存并打印决策报告
@@ -264,14 +308,17 @@ def run_trading_cycle(skip_llm: bool = False):
         
                 # 执行交易决策
         try:
-            trader.execute_decision(final_decision)
+            def execute_trade():
+                trader.execute_decision(final_decision)
+            
+            track_process('trade_execution', execute_trade)
             # 发送成功通知邮件
-            email_notifier.send_decision_notification(final_decision, execution_success=True)
+            email_notifier.send_decision_notification(final_decision, execution_success=True, process_status=process_status)
         except Exception as e:
             error_msg = f"交易执行失败: {str(e)}"
             LOGGER.error(error_msg)
             # 发送失败通知邮件
-            email_notifier.send_decision_notification(final_decision, execution_success=False, error_msg=error_msg)
+            email_notifier.send_decision_notification(final_decision, execution_success=False, error_msg=error_msg, process_status=process_status)
             # 同时发送错误通知邮件
             email_notifier.send_error_notification(
                 "交易执行错误", 
