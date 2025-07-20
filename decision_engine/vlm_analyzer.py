@@ -163,8 +163,14 @@ class VLMAnalyzer:
         
         return analysis_result
 
-    def analyze_kline_chart(self, image_path: str, data_time_range: Optional[str] = None) -> Optional[str]:
-        """分析本地的K线图图片，使用72B模型进行更精准的技术分析，支持基于时间范围的智能缓存。"""
+    def analyze_kline_chart(self, image_path: str, data_time_range: Optional[str] = None, timeframe: Optional[str] = None) -> Optional[str]:
+        """分析本地的K线图图片，使用72B模型进行更精准的技术分析，支持基于时间范围的智能缓存。
+        
+        Args:
+            image_path: K线图图片路径
+            data_time_range: 数据时间范围标识
+            timeframe: 时间周期（如'1h', '1d', '1w'等）
+        """
         
         # 生成缓存hash标识
         if data_time_range:
@@ -197,8 +203,11 @@ class VLMAnalyzer:
             LOGGER.error(f"读取或编码K线图失败: {e}")
             return "读取K线图文件失败。"
             
-        prompt_text = """
-你是一名精通技术分析的资深量化交易员。请仔细分析这张BTC/USDT的K线图。
+        # 根据时间周期生成不同的提示词
+        timeframe_info = self._get_timeframe_info(timeframe)
+        
+        prompt_text = f"""
+你是一名精通技术分析的资深量化交易员。请仔细分析这张BTC/USDT的{timeframe_info['name']}K线图。
 
 **图表指标说明:**
 *   **K线 (Candlestick)**: 绿色(#26A69A)为阳线, 红色(#EF5350)为阴线。
@@ -223,11 +232,11 @@ class VLMAnalyzer:
     *   成交量在关键价格行为（如突破、反转）时是否配合？（例如：放量突破阻力位，缩量回调）
     *   RSI指标处于什么区域（超买/超卖/中性）？是否与价格走势形成背离（顶背离/底背离）？
 4.  **综合结论与策略**:
-    *   **核心结论**: 综合以上所有信息，对未来4-12小时的价格走势给出一个明确的 **看涨 (Bullish)**、**看跌 (Bearish)** 或 **中性/震荡 (Neutral/Sideways)** 的判断。
+    *   **核心结论**: 综合以上所有信息，对{timeframe_info['forecast_period']}的价格走势给出一个明确的 **看涨 (Bullish)**、**看跌 (Bearish)** 或 **中性/震荡 (Neutral/Sideways)** 的判断。
     *   **主要理由**: 简明扼要地列出支持你结论的核心技术信号（例如：MA多头排列，RSI底背离，放量突破上轨）。
     *   **操作建议**: 基于结论，提出具体的交易策略（例如：若看涨，可在XX价位附近入场，止损设于YY，目标看至ZZ）。
 
-请以结构化、逻辑清晰的方式提供你的专业分析。
+请以结构化、逻辑清晰的方式提供你的专业分析，并在报告标题中明确标注这是{timeframe_info['name']}技术分析报告。
 """
         analysis_result = self._analyze_with_vlm(base64_media, mime_type, prompt_text, self.kline_model)
         
@@ -237,6 +246,25 @@ class VLMAnalyzer:
             self.cache.set_kline_analysis(data_hash, info_text, analysis_result)
         
         return analysis_result
+
+    def _get_timeframe_info(self, timeframe: Optional[str]) -> Dict[str, str]:
+        """根据时间周期获取相关信息"""
+        timeframe_mapping = {
+            '1h': {'name': '1小时', 'forecast_period': '未来4-12小时'},
+            '1d': {'name': '日线', 'forecast_period': '未来1-3天'},
+            '1w': {'name': '周线', 'forecast_period': '未来1-2周'},
+            '4h': {'name': '4小时', 'forecast_period': '未来1-2天'},
+            '15m': {'name': '15分钟', 'forecast_period': '未来2-6小时'},
+            '30m': {'name': '30分钟', 'forecast_period': '未来4-8小时'},
+        }
+        
+        # 默认使用1小时
+        default_info = {'name': '1小时', 'forecast_period': '未来4-12小时'}
+        
+        if timeframe is None:
+            return default_info
+        
+        return timeframe_mapping.get(timeframe, default_info)
 
 if __name__ == '__main__':
     from btc_predictor.utils import setup_logger

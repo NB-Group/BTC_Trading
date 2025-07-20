@@ -99,9 +99,15 @@ def get_market_intelligence() -> List[Dict[str, Any]]:
     LOGGER.success(f"情报整合完毕，共获取 {len(news_items)} 条新闻。")
     return news_items
 
-def _generate_and_analyze_kline(vlm_analyzer, price_data, timeframe_alias):
+def _generate_and_analyze_kline(vlm_analyzer, price_data, timeframe_alias, timeframe=None):
     """
     辅助函数：为给定数据生成、保存并分析K线图。
+    
+    Args:
+        vlm_analyzer: VLM分析器实例
+        price_data: 价格数据
+        timeframe_alias: 时间周期别名（用于日志）
+        timeframe: 实际时间周期（如'1h', '1d', '1w'）
     """
     if price_data is None or price_data.empty:
         LOGGER.warning(f"没有价格数据可用于生成 {timeframe_alias} K线图。")
@@ -113,7 +119,7 @@ def _generate_and_analyze_kline(vlm_analyzer, price_data, timeframe_alias):
         return None, None
         
     kline_image_path, data_time_range = kline_result
-    analysis = vlm_analyzer.analyze_kline_chart(kline_image_path, data_time_range)
+    analysis = vlm_analyzer.analyze_kline_chart(kline_image_path, data_time_range, timeframe)
     LOGGER.info(f"{timeframe_alias} K线图VLM分析结果: {analysis}")
     return analysis, data_time_range
 
@@ -173,9 +179,9 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         LOGGER.info("="*50 + "\n步骤 3: 生成并分析多时间框架的K线图")
         
-        short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term")
-        daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data.tail(200) if daily_data is not None else None, "Daily")
-        weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data.tail(100) if weekly_data is not None else None, "Weekly")
+        short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
+        daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data.tail(200) if daily_data is not None else None, "Daily", "1d")
+        weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data.tail(100) if weekly_data is not None else None, "Weekly", "1w")
 
         # ======================================================================
         # 步骤 4: 获取市场新闻情报
