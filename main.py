@@ -256,7 +256,7 @@ def run_trading_cycle(skip_llm: bool = False):
                     final_decision["suggested_trade_size"] = float(0.95)
         LOGGER.info(f"最终用于交易执行的决策数据: {final_decision}")
         
-        # 执行交易决策
+                # 执行交易决策
         try:
             trader.execute_decision(final_decision)
             # 发送成功通知邮件
