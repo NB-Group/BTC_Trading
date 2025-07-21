@@ -199,6 +199,7 @@ class OKXTrader:
                 decision_pos_side = 'long' if decision == 'CLOSE_LONG' else 'short'
                 
                 # 兼容OKX的net持仓模式
+                original_pos_side = current_pos_side  # 保存原始的posSide
                 if current_pos_side == 'net':
                     pos_amount_str = position_info.get('pos')
                     if pos_amount_str and float(pos_amount_str) > 0:
@@ -216,8 +217,8 @@ class OKXTrader:
                 
                 pos_amount_str = position_info.get('pos')
                 contracts = position_info.get('contracts')
-                # 判断持仓模式
-                if current_pos_side == 'net':
+                # 判断持仓模式 - 使用原始的posSide来判断是否为net模式
+                if original_pos_side == 'net':
                     # 单向持仓，使用notionalUsd字段计算张数
                     notional_usd = position_info.get('notionalUsd')
                     if notional_usd is None:
@@ -229,6 +230,22 @@ class OKXTrader:
                     amount = max(1, round(notional_value / contract_value))
                     
                     btc_amount = abs(float(pos_amount_str)) if pos_amount_str else 0
+                    
+                    # 记录余额信息（仅用于日志）
+                    try:
+                        balance = self.exchange.fetch_balance()
+                        info = balance.get('info', {})
+                        usdt_info = info.get('USDT') if isinstance(info, dict) else None
+                        
+                        if usdt_info and isinstance(usdt_info, dict):
+                            equity = float(usdt_info.get('eq', 0))  # 总权益
+                            available = float(usdt_info.get('availBal', 0))  # 可用余额
+                            margin = float(usdt_info.get('margin', 0))  # 已占用保证金
+                            
+                            LOGGER.info(f"余额详情: 总权益=${equity:.2f}, 可用余额=${available:.2f}, 已占用保证金=${margin:.2f}")
+                    except Exception as e:
+                        LOGGER.warning(f"获取余额信息时出错: {e}")
+                    
                     LOGGER.info(f"准备平仓: {decision} {amount}张 {self.trade_symbol} (名义价值${notional_value:.2f}, 约{btc_amount}BTC)...")
                 else:
                     # 双向持仓，amount用张数
