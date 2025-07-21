@@ -218,12 +218,18 @@ class OKXTrader:
                 contracts = position_info.get('contracts')
                 # 判断持仓模式
                 if current_pos_side == 'net':
-                    # 单向持仓，amount用BTC数量
-                    if pos_amount_str is None:
-                        LOGGER.error("无法从仓位信息中获取持仓数量 ('pos')。平仓操作取消。")
+                    # 单向持仓，使用notionalUsd字段计算张数
+                    notional_usd = position_info.get('notionalUsd')
+                    if notional_usd is None:
+                        LOGGER.error("无法从仓位信息中获取名义价值 ('notionalUsd')。平仓操作取消。")
                         return
-                    amount = float(pos_amount_str)
-                    LOGGER.info(f"准备平仓: {decision} {amount} BTC {self.trade_symbol} (net模式)...")
+                    
+                    notional_value = abs(float(notional_usd))  # 取绝对值
+                    contract_value = 100  # OKX永续合约1张=100美元名义价值
+                    amount = max(1, round(notional_value / contract_value))
+                    
+                    btc_amount = abs(float(pos_amount_str)) if pos_amount_str else 0
+                    LOGGER.info(f"准备平仓: {decision} {amount}张 {self.trade_symbol} (名义价值${notional_value:.2f}, 约{btc_amount}BTC)...")
                 else:
                     # 双向持仓，amount用张数
                     if contracts is not None and pos_amount_str is not None and float(contracts) > 0:
