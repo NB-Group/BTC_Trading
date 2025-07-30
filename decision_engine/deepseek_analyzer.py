@@ -167,6 +167,18 @@ class DeepSeekAnalyzer:
         twitter_part = self._format_twitter_data(twitter_data)
         kline_part = self._format_kline_analysis(kline_analysis)
         position_part = self._format_position_info(current_position)
+        # 持仓记忆：尝试读取 last_run.json，补充持仓上下文
+        import os
+        last_decision_info = ''
+        last_json_path = os.path.join(os.path.dirname(__file__), '../last_run.json')
+        if os.path.exists(last_json_path):
+            try:
+                with open(last_json_path, 'r', encoding='utf-8') as f:
+                    last_data = json.load(f)
+                if last_data.get('decision') in ['LONG', 'SHORT']:
+                    last_decision_info = f"\n# 持仓记忆\n- 上次开仓方向: {last_data.get('decision')}\n- 上次开仓原因: {last_data.get('reasoning', '')}\n- 上次关键信号: {last_data.get('key_signals_detected', '')}\n- 上次置信度: {last_data.get('confidence', '')}\n"
+            except Exception as e:
+                last_decision_info = f"\n# 持仓记忆读取失败: {e}\n"
         balance_part = self._format_balance_info(current_balance)
         
         # 获取当前UTC时间和市场价格
@@ -208,9 +220,10 @@ class DeepSeekAnalyzer:
 - **短线盈利优先**: 只要VLM技术分析显示短线盈利机会（1H K线），就优先考虑短线盈利机会，忽略长期金融市场趋势。
 - **如果持有仓位与长期方向相同，但与短期方向相反，在盈利时可以平仓，但不盈利时建议继续持有，总之就是慎防亏损最多的时候卖出。**
 
-# 当前市场状态
-- **分析时间**: {current_time_utc}
-- {market_context_part}
+        # 当前市场状态与持仓记忆
+        - **分析时间**: {current_time_utc}
+        - {market_context_part}
+        {last_decision_info}
 
 # 信息输入
 {position_part}
@@ -228,20 +241,20 @@ class DeepSeekAnalyzer:
 
 # 交易参数设置指南
 **短线交易策略**:
-- 以小时级别波动为主，止损建议2.5%（常规）或3%（信号强烈时），止盈建议5%（常规）或6%（信号强烈时）。
+- 以小时级别波动为主，止损建议4%（常规）或5%（信号强烈时），止盈建议8%（常规）或10%（信号强烈时）。
 - 仓位大小95%（全仓操作，但用杠杆控制风险）。
 
 # JSON输出格式
 {{
   "decision": "LONG/SHORT/HOLD/CLOSE_LONG/CLOSE_SHORT",
-  "reasoning": "详细说明你做出决策的完整逻辑链，必须首先陈述当前持仓状态，然后报告是否发现了关键风险信号，最后体现你对'分析框架与优先级'的遵守，解释你如何权衡不同来源的数据。",
+  "reasoning": "详细说明你做出决策的完整逻辑链，必须首先陈述当前持仓状态，然后报告是否发现了关键风险信号，最后体现你对'分析框架与优先级'的遵守，解释你如何权衡不同来源的数据。务必参考上次开仓原因、信号、置信度等持仓记忆，只有反向信号足够强或达到止损/止盈条件时才建议平仓。",
   "key_signals_detected": "如果发现了'大海捞针'类型的关键信号，请明确列出；如果没有发现，请说明'无关键风险信号'",
-  "confidence": 0.7,
+  "confidence": "请根据当前与历史信号自动判断置信度，范围0-1，不要固定。",
   "suggested_trade_size": 0.95,
   "trade_params": {{
     "leverage": 2,
-    "take_profit_pct": 5.0,
-    "stop_loss_pct": 2.5
+    "take_profit_pct": 8.0,
+    "stop_loss_pct": 4.0
   }},
   "risk_assessment": "对此次交易潜在风险的简要评估，特别注意是否存在黑天鹅风险。"
 }}

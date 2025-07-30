@@ -39,7 +39,19 @@ def get_exchange() -> Optional[ccxt.Exchange]:
         # 统一从根配置获取代理
         proxy_url = getattr(root_config, 'DEFAULTS', {}).get('proxy_url')
         
+        # 基础配置
         exchange_config = {'options': {'defaultType': 'spot'}} # 默认使用现货市场
+        
+        # 如果是OKX，尝试添加API密钥（用于提高请求限制，即使获取公开数据也有用）
+        if DATA_CONFIG['exchange'] == 'okx':
+            okx_creds = getattr(root_config, 'API_KEYS', {}).get('okx', {})
+            if okx_creds.get('api_key') and okx_creds.get('secret_key') and okx_creds.get('passphrase'):
+                exchange_config.update({
+                    'apiKey': okx_creds['api_key'],
+                    'secret': okx_creds['secret_key'],
+                    'password': okx_creds['passphrase'],
+                })
+                LOGGER.info("已配置OKX API密钥以提高请求限制")
         
         if proxy_url:
             LOGGER.info(f"正在为交易所配置代理: {proxy_url}")

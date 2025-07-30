@@ -92,7 +92,7 @@ python main.py
 
 ### 启动仪表板
 ```bash
-python run_dashboard.py
+streamlit run dashboard.py    
 ```
 
 ## 🔧 配置说明
