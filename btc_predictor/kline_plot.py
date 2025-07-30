@@ -39,16 +39,26 @@ def _create_kline_screenshot(html_path: str, image_path: str) -> None:
         page = browser.new_page()
         try:
             # 使用 file:// 协议打开本地HTML文件
-            page.goto(f"file://{os.path.abspath(html_path)}")
-            # 等待canvas渲染出来
-            page.wait_for_selector(".chart-container canvas", state='visible', timeout=15000)
-            time.sleep(1)  # 等待加载动画完成
-            chart_element = page.query_selector(".chart-container")
-            if chart_element:
-                chart_element.screenshot(path=image_path)
-                LOGGER.success(f"K线图截图已保存到: {image_path}")
+            max_attempts = 5
+            for attempt in range(1, max_attempts + 1):
+                try:
+                    page.goto(f"file://{os.path.abspath(html_path)}", wait_until="load", timeout=90000)
+                    page.wait_for_selector(".chart-container canvas", state='visible', timeout=30000)
+                    time.sleep(1)
+                    chart_element = page.query_selector(".chart-container")
+                    if chart_element:
+                        chart_element.screenshot(path=image_path)
+                        LOGGER.success(f"K线图截图已保存到: {image_path}")
+                        break
+                    else:
+                        LOGGER.warning(f"第{attempt}次未找到 .chart-container 元素，刷新页面重试...")
+                        page.reload()
+                except Exception as inner_e:
+                    LOGGER.warning(f"第{attempt}次截图失败: {inner_e}")
+                    page.reload()
+                    time.sleep(2)
             else:
-                LOGGER.error("无法找到 .chart-container 元素进行截图。")
+                LOGGER.error(f"多次刷新后仍无法截图，放弃。")
         except Exception as e:
             LOGGER.error(f"Playwright截图时出错: {e}")
             try:
@@ -73,14 +83,18 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
         os.makedirs(save_dir, exist_ok=True)
 
         # --- 步骤 1: 数据准备和指标计算 ---
-        # 确保索引是 DatetimeIndex 并补齐缺失数据
+        # 确保索引是 DatetimeIndex
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index)
         
-        full_index = pd.date_range(start=df.index.min(), end=df.index.max(), freq='H')
-        df_filled = df.reindex(full_index)
+        # 创建一个完整的时间序列，以连接断点
+        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='H')
+        df_reindexed = df.reindex(full_range)
         
-        # 使用前一个有效收盘价填充OHLC，成交量填0
+        # 使用前向填充来填充数据，但保留K线形状
+        df_filled = df_reindexed.copy()
+        
+        # 填充 OHLC 数据：用收盘价填充，然后前向填充
         df_filled['close'] = df_filled['close'].ffill()
         df_filled['open'] = df_filled['open'].fillna(df_filled['close'])
         df_filled['high'] = df_filled['high'].fillna(df_filled['close'])
@@ -88,20 +102,20 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
         df_filled['volume'] = df_filled['volume'].fillna(0)
         
         # 计算技术指标
-        ma5 = df_filled['close'].rolling(window=5).mean().round(2)
-        ma10 = df_filled['close'].rolling(window=10).mean().round(2)
-        ma20 = df_filled['close'].rolling(window=20).mean().round(2)
-        ma60 = df_filled['close'].rolling(window=60).mean().round(2)
+        ma5 = df_filled['close'].rolling(window=5, min_periods=1).mean().round(2)
+        ma10 = df_filled['close'].rolling(window=10, min_periods=1).mean().round(2)
+        ma20 = df_filled['close'].rolling(window=20, min_periods=1).mean().round(2)
+        ma60 = df_filled['close'].rolling(window=60, min_periods=1).mean().round(2)
         
-        std_dev = df_filled['close'].rolling(window=20).std()
+        std_dev = df_filled['close'].rolling(window=20, min_periods=1).std()
         boll_upper = (ma20 + 2 * std_dev).round(2)
         boll_lower = (ma20 - 2 * std_dev).round(2)
         
         delta = df_filled['close'].diff()
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
-        avg_gain = gain.rolling(window=14).mean()
-        avg_loss = loss.rolling(window=14).mean()
+        avg_gain = gain.rolling(window=14, min_periods=1).mean()
+        avg_loss = loss.rolling(window=14, min_periods=1).mean()
         # 使用 np.where 避免直接在 Series 上 .replace
         safe_avg_loss = pd.Series(np.where(avg_loss == 0, 1e-9, avg_loss), index=df_filled.index)
         rs = avg_gain / safe_avg_loss

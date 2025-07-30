@@ -21,15 +21,25 @@ from .model import create_model
 
 def setup_logger():
     """
-    设置loguru日志记录器，支持中英文切换。
+    设置loguru日志记录器，支持中英文切换，采用莫兰迪色调。
     """
     logger.remove() 
     if LOG_LANG == 'zh':
-        fmt_console = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        # 莫兰迪色调：使用loguru官方支持的<fg xxx>格式
+        fmt_console = "<fg 109>{time:YYYY-MM-DD HH:mm:ss}</fg 109> | <level>{level: <8}</level> | <fg 180>{name}</fg 180>:<fg 152>{function}</fg 152>:<fg 143>{line}</fg 143> - <level>{message}</level>"
         fmt_file = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
     else:
-        fmt_console = "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
+        fmt_console = "<fg 109>{time:YYYY-MM-DD HH:mm:ss}</fg 109> | <level>{level: <8}</level> | <fg 180>{name}</fg 180>:<fg 152>{function}</fg 152>:<fg 143>{line}</fg 143> - <level>{message}</level>"
         fmt_file = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} - {message}"
+
+    # 自定义日志级别颜色（莫兰迪色调）
+    logger.level("DEBUG", color="<fg 102>")    # 莫兰迪灰绿色
+    logger.level("INFO", color="<fg 152>")     # 莫兰迪薄荷绿
+    logger.level("SUCCESS", color="<fg 143>")  # 莫兰迪暖灰色
+    logger.level("WARNING", color="<fg 180>")  # 莫兰迪橄榄色
+    logger.level("ERROR", color="<fg 174>")    # 莫兰迪粉橙色
+    logger.level("CRITICAL", color="<fg 138>") # 莫兰迪深粉色
+
     logger.add(
         sys.stderr,
         level="INFO",

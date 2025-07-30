@@ -130,42 +130,44 @@ class OKXTrader:
                 leverage = params.get('leverage', self.leverage)
                 self.exchange.set_leverage(leverage, self.trade_symbol)
                 
-                # 计算下单数量（使用建议的仓位大小）
-                balance = self.get_balance('USDT')
-                trade_value = balance * suggested_trade_size
-                
-                # 计算下单张数（OKX永续合约1张=100美元名义价值）
-                contract_value = 100  # BTC-USDT-SWAP
-                amount = max(1, round(trade_value / contract_value))  # 至少1张
-                actual_value = amount * contract_value
-                LOGGER.info(f"实际下单张数: {amount} 张, 名义价值: ${actual_value}")
-                
-                # 检查是否满足OKX的最小数量要求
-                min_amount = 0.01  # OKX要求的最小数量
-                if amount < min_amount:
-                    # 如果计算的数量小于最小要求，检查是否有足够资金
-                    if current_price is not None:
-                        required_value = (min_amount * float(current_price)) / leverage
-                        if required_value <= balance:
-                            # 有足够资金，使用最小数量
-                            amount = min_amount
-                            trade_value = required_value
-                            LOGGER.warning(f"计算数量 {amount:.6f} BTC 小于最小要求，调整为最小数量 {min_amount} BTC")
-                        else:
-                            # 资金不足，无法开仓
-                            LOGGER.error("资金不足，无法满足最小数量要求。需要 ${:.2f}，当前余额 ${:.2f}", required_value, balance)
+                # 获取最大可开张数（OKX API）
+                max_amount = None
+                try:
+                    market = self.exchange.market(self.trade_symbol)
+                    # fetch_positions_risk 返回每个合约的最大可开张数（maxOpenPos）
+                    risk = self.exchange.fetch_positions_risk([self.trade_symbol])
+                    for r in risk:
+                        if r.get('symbol') == self.trade_symbol and 'maxOpenPos' in r:
+                            max_amount = int(float(r['maxOpenPos']))
+                            break
+                except Exception as e:
+                    LOGGER.warning(f"获取最大可开张数失败: {e}")
+                if max_amount is None:
+                    # fallback: 手动计算最大可开张数
+                    try:
+                        avail_eq = self.get_balance('USDT')
+                        if avail_eq <= 0:
+                            LOGGER.error("可用保证金为0，无法下单。")
                             return
-                    else:
-                        LOGGER.error("无法获取当前价格，无法计算所需资金")
+                        ticker = self.exchange.fetch_ticker(self.trade_symbol)
+                        current_price = float(ticker['last'])
+                        contract_value = 100  # BTC-USDT-SWAP 一张=100美元名义价值
+                        max_amount = int(avail_eq * leverage / (contract_value * current_price / 100))
+                        if max_amount < 1:
+                            max_amount = 1
+                        LOGGER.info(f"手动计算最大可开张数: availEq={avail_eq}, 杠杆={leverage}, 现价={current_price}, 合约面值={contract_value}，最大可开张数={max_amount}")
+                    except Exception as e:
+                        LOGGER.error(f"手动计算最大可开张数失败: {e}")
                         return
                 else:
-                    # 确保数量在合理范围内
-                    amount = min(amount, 1.0)  # 最大1.0 BTC
+                    LOGGER.info(f"最大可开张数: {max_amount}")
+                amount = max_amount
+                LOGGER.info(f"将用最大可开张数下单: {amount} 张, 杠杆: {leverage}x")
                 
                 side = 'buy' if decision == 'LONG' else 'sell'
                 pos_side = 'long' if decision == 'LONG' else 'short'
                 
-                LOGGER.info(f"准备开新仓: {decision} {amount}张 {self.trade_symbol} (杠杆: {leverage}x, 价值: ${actual_value})...")
+                LOGGER.info(f"准备开新仓: {decision} 保证金 {amount} USDT {self.trade_symbol} (杠杆: {leverage}x)...")
                 
                 # 创建市价单
                 order_params = {'tdMode': self.margin_mode}
@@ -186,7 +188,6 @@ class OKXTrader:
                 # 设置止损和止盈订单（如果提供了百分比参数）
                 if 'stop_loss_pct' in params or 'take_profit_pct' in params:
                     if current_price is not None:
-                        # 使用下单时的amount参数，而不是order中的amount（市价单为None）
                         self._set_stop_orders(order, float(current_price), params, pos_side, amount)
 
             # 如果需要平仓 (CLOSE_LONG or CLOSE_SHORT)
@@ -219,34 +220,16 @@ class OKXTrader:
                 contracts = position_info.get('contracts')
                 # 判断持仓模式 - 使用原始的posSide来判断是否为net模式
                 if original_pos_side == 'net':
-                    # 单向持仓，使用notionalUsd字段计算张数
-                    notional_usd = position_info.get('notionalUsd')
-                    if notional_usd is None:
-                        LOGGER.error("无法从仓位信息中获取名义价值 ('notionalUsd')。平仓操作取消。")
+                    # 单向持仓模式下，直接使用 'pos' 字段作为平仓数量（单位为BTC）
+                    if not pos_amount_str:
+                        LOGGER.error("无法从仓位信息中获取持仓数量 ('pos')。平仓操作取消。")
                         return
                     
-                    notional_value = abs(float(notional_usd))  # 取绝对值
-                    contract_value = 100  # OKX永续合约1张=100美元名义价值
-                    amount = max(1, round(notional_value / contract_value))
-                    
-                    btc_amount = abs(float(pos_amount_str)) if pos_amount_str else 0
-                    
-                    # 记录余额信息（仅用于日志）
-                    try:
-                        balance = self.exchange.fetch_balance()
-                        info = balance.get('info', {})
-                        usdt_info = info.get('USDT') if isinstance(info, dict) else None
-                        
-                        if usdt_info and isinstance(usdt_info, dict):
-                            equity = float(usdt_info.get('eq', 0))  # 总权益
-                            available = float(usdt_info.get('availBal', 0))  # 可用余额
-                            margin = float(usdt_info.get('margin', 0))  # 已占用保证金
-                            
-                            LOGGER.info(f"余额详情: 总权益=${equity:.2f}, 可用余额=${available:.2f}, 已占用保证金=${margin:.2f}")
-                    except Exception as e:
-                        LOGGER.warning(f"获取余额信息时出错: {e}")
-                    
-                    LOGGER.info(f"准备平仓: {decision} {amount}张 {self.trade_symbol} (名义价值${notional_value:.2f}, 约{btc_amount}BTC)...")
+                    amount = abs(float(pos_amount_str))
+                    notional_usd = position_info.get('notionalUsd')
+                    notional_value = abs(float(notional_usd)) if notional_usd else 0.0
+
+                    LOGGER.info(f"准备平仓: {decision} {amount} {self.trade_symbol} (名义价值 ${notional_value:.2f})...")
                 else:
                     # 双向持仓，amount用张数
                     if contracts is not None and pos_amount_str is not None and float(contracts) > 0:
@@ -291,6 +274,28 @@ class OKXTrader:
 
     def _set_stop_orders(self, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str, order_amount: float = None):
         """
+        设置止损和止盈订单前，先撤销当前symbol和pos_side的所有未成交止盈止损委托单。
+        """
+        try:
+            # 先撤销未成交止盈止损单
+            open_orders = self.exchange.fetch_open_orders(symbol=self.trade_symbol)
+            for o in open_orders:
+                # 只撤销本方向的止盈止损单（不撤reduceOnly的平仓单）
+                o_type = o.get('type')
+                o_params = o.get('info', {})
+                o_pos_side = o_params.get('posSide') if self.hedge_mode else pos_side
+                reduce_only = o_params.get('reduceOnly', False)
+                # OKX止损单type为'stop'，止盈单type为'limit'但带止盈价，且都不是reduceOnly
+                if o.get('status') in ('open', 'new') and o_pos_side == pos_side and not reduce_only:
+                    if o_type in ('stop', 'trigger', 'conditional') or (o_type == 'limit' and ('takeProfit' in o_params or 'tpTriggerPx' in o_params)):
+                        try:
+                            self.exchange.cancel_order(o['id'], symbol=self.trade_symbol)
+                            LOGGER.info(f"已撤销未成交止盈止损单: {o['id']} {o_type} {o_pos_side}")
+                        except Exception as ce:
+                            LOGGER.warning(f"撤销止盈止损单失败: {o['id']} {ce}")
+        except Exception as e:
+            LOGGER.warning(f"获取/撤销未成交止盈止损单时出错: {e}")
+        """
         设置止损和止盈订单。
         
         Args:
@@ -314,14 +319,26 @@ class OKXTrader:
             # 优先使用传入的order_amount，如果没有则尝试从main_order获取
             if order_amount is not None:
                 amount = float(order_amount)
+                LOGGER.info(f"[仓位计算] 使用传入的order_amount: {amount}")
             else:
-                amount = main_order.get('amount') if isinstance(main_order, dict) else getattr(main_order, 'amount', None)
-                if amount is None:
+                # 尝试从订单中获取数量
+                order_amount_from_order = None
+                if isinstance(main_order, dict):
+                    order_amount_from_order = main_order.get('amount')
+                else:
+                    order_amount_from_order = getattr(main_order, 'amount', None)
+                
+                if order_amount_from_order is not None:
+                    amount = float(order_amount_from_order)
+                    LOGGER.info(f"[仓位计算] 从main_order获取数量: {amount}")
+                else:
                     LOGGER.error("无法获取订单数量，无法设置止盈止损单。main_order={}, order_amount={}".format(main_order, order_amount))
                     return
-                amount = float(amount)
             
+            # 确保数量精度正确
             amount = round(amount, 4)
+            LOGGER.info(f"[仓位计算] 最终使用数量: {amount}, 仓位方向: {pos_side}")
+            
             stop_loss_price = None
             take_profit_price = None
             if stop_loss_pct:
@@ -333,16 +350,19 @@ class OKXTrader:
                 if stop_loss_price is None:
                     LOGGER.error("stop_loss_price为None，跳过止损单下单。")
                 else:
+                    # 使用OKX标准计划委托（trigger单），防止下单即成交
                     stop_order_params = {
                         'tdMode': self.margin_mode,
-                        'stopPrice': stop_loss_price
+                        'triggerPrice': stop_loss_price,
+                        'orderType': 'market',  # 触发后市价
+                        'orderPx': '',  # 市价计划委托必须传递orderPx字段
                     }
                     if self.hedge_mode:
                         stop_order_params['posSide'] = pos_side
-                    LOGGER.info(f"提交止损单，数量: {amount}, 类型: {type(amount)}")
+                    LOGGER.info(f"提交止损计划委托单，数量: {amount}, 类型: {type(amount)} triggerPrice={stop_loss_price}")
                     stop_order = self.exchange.create_order(
                         symbol=self.trade_symbol,
-                        type='market',
+                        type='trigger',  # 计划委托
                         side='sell' if pos_side == 'long' else 'buy',
                         amount=amount,
                         params=stop_order_params
@@ -350,7 +370,7 @@ class OKXTrader:
                     if isinstance(stop_order, dict) and 'code' in stop_order:
                         LOGGER.error("止损单下单失败，返回错误: {}", stop_order)
                         raise RuntimeError(f"止损单下单失败: {stop_order}")
-                    LOGGER.info(f"止损订单已设置: 价格 ${stop_loss_price:.2f}")
+                    LOGGER.info(f"止损计划委托已设置: 触发价 ${stop_loss_price:.2f}")
             if take_profit_pct:
                 if pos_side == 'long':
                     take_profit_price = entry_price * (1 + take_profit_pct / 100)
@@ -384,26 +404,42 @@ class OKXTrader:
 
     def get_balance(self, currency: str = 'USDT'):
         """
-        Return available margin (equity) for the futures account. For dashboard compatibility.
+        获取指定货币的可用保证金 (available equity)。
+        OKX返回的是一个包含多个币种信息的列表，我们需要找到USDT并提取'availEq'。
         """
         if self.demo_mode:
-            LOGGER.info(f"Demo mode: returning fixed margin balance for {currency}: 500.0")
+            LOGGER.info(f"模拟盘模式: 返回固定可用保证金 {currency}: 500.0")
             return 500.0
         try:
+            # 获取账户余额信息
             balance = self.exchange.fetch_balance()
-            info = balance.get('info', {})
-            usdt_info = info.get('USDT') if isinstance(info, dict) else None
-            if usdt_info and isinstance(usdt_info, dict):
-                equity = float(usdt_info.get('eq', 0))
-                LOGGER.info(f"Futures margin (equity) for {currency}: {equity}")
-                return equity
-            # 备用方案：尝试从total获取
-            if 'total' in balance and currency in balance['total']:
-                equity = float(balance['total'][currency])
-                LOGGER.info(f"Futures margin (equity) for {currency}: {equity}")
-                return equity
-            LOGGER.warning(f"Could not find margin (equity) for {currency} in balance response.")
+            
+            # OKX v5 API的响应结构通常在 'info' 字段中
+            # 路径: info -> data -> [0] -> details -> [...]
+            if 'info' in balance and 'data' in balance['info'] and balance['info']['data']:
+                details = balance['info']['data'][0].get('details', [])
+                for asset in details:
+                    if asset.get('ccy') == currency:
+                        # 'availEq' 是可用作保证金的权益（以USD计价），这是最准确的指标
+                        available_equity = float(asset.get('availEq', 0))
+                        if available_equity > 0:
+                            LOGGER.info(f"获取到 {currency} 可用保证金 (availEq): {available_equity}")
+                            return available_equity
+                        else:
+                            # 如果availEq为0，可能是因为没有仓位，此时用可用余额availBal
+                            available_balance = float(asset.get('availBal', 0))
+                            LOGGER.info(f"可用保证金为0，回退到可用余额 (availBal): {available_balance}")
+                            return available_balance
+
+            # 如果上述路径找不到，尝试备用方案
+            if currency in balance:
+                available_balance = float(balance[currency].get('free', 0))
+                if available_balance > 0:
+                    LOGGER.warning(f"备用方案: 获取到 {currency} 可用余额 (free): {available_balance}")
+                    return available_balance
+
+            LOGGER.error(f"无法在余额响应中找到 {currency} 的可用保证金。响应: {balance}")
             return 0
         except Exception as e:
-            LOGGER.error("Error fetching margin (equity) for {}: {}", currency, e)
+            LOGGER.error("获取可用保证金时出错: {}", e, exc_info=True)
             return 0 

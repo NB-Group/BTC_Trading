@@ -6,7 +6,7 @@ import mimetypes
 from typing import List, Dict, Any, Optional
 import json # 添加用于详细错误日志记录
 import hashlib # 添加用于K线图缓存哈希
-from tenacity import retry, stop_after_attempt, wait_exponential
+from tenacity import retry, stop_after_attempt, wait_exponential, RetryError
 
 import config
 from btc_predictor.utils import LOGGER
@@ -82,6 +82,20 @@ class VLMAnalyzer:
             "max_tokens": 2000 # 为K线图分析增加token上限
         }
 
+        # --- 代理设置处理 ---
+        # 记录原始代理设置
+        orig_http_proxy = os.environ.get('http_proxy')
+        orig_https_proxy = os.environ.get('https_proxy')
+        orig_HTTP_PROXY = os.environ.get('HTTP_PROXY')
+        orig_HTTPS_PROXY = os.environ.get('HTTPS_PROXY')
+        orig_session_proxies = getattr(self.session, 'proxies', None)
+
+        # 清除所有代理设置
+        for key in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
+            if key in os.environ:
+                del os.environ[key]
+        self.session.proxies = {}
+
         try:
             LOGGER.info(f"正在使用模型 {model_name} 进行VLM分析...")
             LOGGER.debug(f"VLM API URL: {self.api_url}")
@@ -128,13 +142,42 @@ class VLMAnalyzer:
                     LOGGER.error(f"请求payload: {json.dumps(debug_payload, indent=2, ensure_ascii=False)}")
                     LOGGER.error("=== 调试信息结束 ===")
             
-            return f"VLM API请求失败: {e}"
+            # 返回一个默认的分析结果，而不是抛出异常
+            return f"VLM分析暂时不可用（网络问题），将基于K线图形态进行基础分析。建议观察价格在关键支撑阻力位的表现。"
+        except RetryError as e:
+            LOGGER.error(f"VLM API重试耗尽，彻底失败: {e}")
+            return f"VLM分析暂时不可用（网络问题），将基于K线图形态进行基础分析。建议观察价格在关键支撑阻力位的表现。"
         except (KeyError, IndexError) as e:
             LOGGER.error(f"解析VLM API响应失败: {e}")
-            return "解析VLM API响应失败。"
+            return "VLM分析响应解析失败，建议使用技术指标辅助判断。"
+        finally:
+            # --- 恢复代理设置 ---
+            if orig_http_proxy is not None:
+                os.environ['http_proxy'] = orig_http_proxy
+            if orig_https_proxy is not None:
+                os.environ['https_proxy'] = orig_https_proxy
+            if orig_HTTP_PROXY is not None:
+                os.environ['HTTP_PROXY'] = orig_HTTP_PROXY
+            if orig_HTTPS_PROXY is not None:
+                os.environ['HTTPS_PROXY'] = orig_HTTPS_PROXY
+            if orig_session_proxies is not None:
+                self.session.proxies = orig_session_proxies
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=2, max=10))
+    @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=15))
     def post_with_retry(self, url, headers, json, timeout):
+        # 每次重试前都彻底清理代理设置
+        import os
+        for key in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
+            if key in os.environ:
+                del os.environ[key]
+        
+        # 确保session代理也清空
+        self.session.proxies = {}
+        
+        # 增加间隔避免频繁请求
+        import time
+        time.sleep(2)
+        
         return self.session.post(url, headers=headers, json=json, timeout=timeout)
 
     def analyze_media(self, media_url: str, tweet_text: str, is_video: bool = False) -> Optional[str]:
@@ -163,13 +206,14 @@ class VLMAnalyzer:
         
         return analysis_result
 
-    def analyze_kline_chart(self, image_path: str, data_time_range: Optional[str] = None, timeframe: Optional[str] = None) -> Optional[str]:
+    def analyze_kline_chart(self, image_path: str, data_time_range: Optional[str] = None, timeframe: Optional[str] = None, price_data=None) -> Optional[str]:
         """分析本地的K线图图片，使用72B模型进行更精准的技术分析，支持基于时间范围的智能缓存。
         
         Args:
             image_path: K线图图片路径
             data_time_range: 数据时间范围标识
             timeframe: 时间周期（如'1h', '1d', '1w'等）
+            price_data: 价格数据DataFrame，用于提取价格范围信息
         """
         
         # 生成缓存hash标识
@@ -206,9 +250,26 @@ class VLMAnalyzer:
         # 根据时间周期生成不同的提示词
         timeframe_info = self._get_timeframe_info(timeframe)
         
+        # 提取价格范围信息（如果有价格数据）
+        price_range_info = ""
+        if price_data is not None and not price_data.empty:
+            try:
+                current_price = price_data['close'].iloc[-1]
+                high_price = price_data['high'].max()
+                low_price = price_data['low'].min()
+                price_range_info = f"""
+
+**重要价格参考信息:**
+*   **当前价格**: 约 {current_price:,.0f} USDT
+*   **图表价格范围**: {low_price:,.0f} - {high_price:,.0f} USDT
+*   **注意**: 请基于这个价格范围来识别图表中的支撑阻力位，避免价格读取错误。
+"""
+            except Exception as e:
+                LOGGER.warning(f"提取价格范围信息失败: {e}")
+        
         prompt_text = f"""
 你是一名精通技术分析的资深量化交易员。请仔细分析这张BTC/USDT的{timeframe_info['name']}K线图。
-
+{price_range_info}
 **图表指标说明:**
 *   **K线 (Candlestick)**: 绿色(#26A69A)为阳线, 红色(#EF5350)为阴线。
 *   **移动平均线 (MA)**:
@@ -238,14 +299,40 @@ class VLMAnalyzer:
 
 请以结构化、逻辑清晰的方式提供你的专业分析，并在报告标题中明确标注这是{timeframe_info['name']}技术分析报告。
 """
-        analysis_result = self._analyze_with_vlm(base64_media, mime_type, prompt_text, self.kline_model)
-        
-        # 将结果缓存起来（如果分析成功）
-        if analysis_result and not analysis_result.startswith("VLM API请求失败"):
-            info_text = data_time_range or f"K线图文件: {os.path.basename(image_path)}"
-            self.cache.set_kline_analysis(data_hash, info_text, analysis_result)
-        
-        return analysis_result
+        try:
+            analysis_result = self._analyze_with_vlm(base64_media, mime_type, prompt_text, self.kline_model)
+            
+            # 将结果缓存起来（如果分析成功）
+            if analysis_result and not analysis_result.startswith("VLM API请求失败"):
+                info_text = data_time_range or f"K线图文件: {os.path.basename(image_path)}"
+                self.cache.set_kline_analysis(data_hash, info_text, analysis_result)
+            
+            return analysis_result
+            
+        except Exception as e:
+            # VLM分析失败时的降级处理，不让系统崩溃
+            LOGGER.warning(f"VLM分析失败 ({timeframe_info['name']}): {e}")
+            fallback_analysis = f"""### BTC/USDT {timeframe_info['name']}技术分析报告（降级模式）
+
+---
+
+VLM分析暂时不可用（网络问题），将基于K线图形态进行基础分析。
+
+#### 技术分析建议
+- **当前状态**: 系统无法完成详细的图表分析
+- **操作建议**: 建议观察价格在关键支撑阻力位的表现
+- **风险提示**: 在网络连接恢复前，建议谨慎操作或暂停自动交易
+
+#### 降级策略
+- 密切关注价格突破关键技术位的确认
+- 结合成交量变化判断趋势强度
+- 重点关注主要移动平均线的支撑阻力作用
+
+---
+
+**注意**: 本报告为降级模式，建议等待网络恢复后重新获取完整分析。
+"""
+            return fallback_analysis
 
     def _get_timeframe_info(self, timeframe: Optional[str]) -> Dict[str, str]:
         """根据时间周期获取相关信息"""

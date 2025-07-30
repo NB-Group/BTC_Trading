@@ -26,46 +26,46 @@ def save_decision_report(report: Dict[str, Any]):
 
 def print_decision_report(report: Dict[str, Any]):
     """在终端用美观的格式打印决策报告。"""
-    print("\n" + "="*80)
-    print("           📊 BTC 期货智能决策系统 - 最终决策报告")
-    print("="*80)
+    print("\n" + "\033[38;5;102m" + "="*80 + "\033[0m")
+    print("\033[38;5;180m           📊 BTC 期货智能决策系统 - 最终决策报告\033[0m")
+    print("\033[38;5;102m" + "="*80 + "\033[0m")
     
     decision = report.get("decision", "N/A").upper()
     color_map = {
-        "LONG": "\033[92m",   # 绿色
-        "SHORT": "\033[91m",  # 红色
-        "CLOSE_LONG": "\033[93m", # 黄色
-        "CLOSE_SHORT": "\033[93m",# 黄色
-        "HOLD": "\033[94m"    # 蓝色
+        "LONG": "\033[38;5;143m",      # 莫兰迪暖灰色
+        "SHORT": "\033[38;5;174m",     # 莫兰迪粉橙色
+        "CLOSE_LONG": "\033[38;5;180m", # 莫兰迪橄榄色
+        "CLOSE_SHORT": "\033[38;5;180m",# 莫兰迪橄榄色
+        "HOLD": "\033[38;5;152m"       # 莫兰迪薄荷绿
     }
     color = color_map.get(decision, "\033[0m") # 默认无颜色
-    print(f"  - 最终决策: {color}{decision}\033[0m")
+    print(f"\033[38;5;109m  - 最终决策: {color}{decision}\033[0m")
         
-    print(f"  - 置信度: {report.get('confidence', 'N/A')}")
+    print(f"\033[38;5;109m  - 置信度: {report.get('confidence', 'N/A')}\033[0m")
     trade_params = report.get('trade_params')
     if trade_params:
-        print("  - 交易参数:")
-        print(f"    - 杠杆: {trade_params.get('leverage', 'N/A')}x")
+        print("\033[38;5;109m  - 交易参数:\033[0m")
+        print(f"\033[38;5;102m    - 杠杆: {trade_params.get('leverage', 'N/A')}x\033[0m")
         tp_pct = trade_params.get('take_profit_pct')
         sl_pct = trade_params.get('stop_loss_pct')
-        print(f"    - 止盈: {tp_pct}%" if tp_pct is not None else "    - 止盈: N/A")
-        print(f"    - 止损: {sl_pct}%" if sl_pct is not None else "    - 止损: N/A")
+        print(f"\033[38;5;102m    - 止盈: {tp_pct}%\033[0m" if tp_pct is not None else "\033[38;5;102m    - 止盈: N/A\033[0m")
+        print(f"\033[38;5;102m    - 止损: {sl_pct}%\033[0m" if sl_pct is not None else "\033[38;5;102m    - 止损: N/A\033[0m")
 
-    print("-" * 80)
-    print("  - 决策理由:")
+    print("\033[38;5;102m" + "-" * 80 + "\033[0m")
+    print("\033[38;5;109m  - 决策理由:\033[0m")
     # 将长文本自动换行
     reasoning = report.get('reasoning', 'N/A')
     import textwrap
-    wrapped_reasoning = "\n".join(["    " + line for line in textwrap.wrap(reasoning, width=100)])
+    wrapped_reasoning = "\n".join(["\033[38;5;145m    " + line + "\033[0m" for line in textwrap.wrap(reasoning, width=100)])
     print(wrapped_reasoning)
     
-    print("-" * 80)
-    print("  - 关键信号:")
-    print(f"    {report.get('key_signals_detected', 'N/A')}")
-    print("-" * 80)
-    print("  - 风险评估:")
-    print(f"    {report.get('risk_assessment', 'N/A')}")
-    print("="*80 + "\n")
+    print("\033[38;5;102m" + "-" * 80 + "\033[0m")
+    print("\033[38;5;109m  - 关键信号:\033[0m")
+    print(f"\033[38;5;145m    {report.get('key_signals_detected', 'N/A')}\033[0m")
+    print("\033[38;5;102m" + "-" * 80 + "\033[0m")
+    print("\033[38;5;109m  - 风险评估:\033[0m")
+    print(f"\033[38;5;145m    {report.get('risk_assessment', 'N/A')}\033[0m")
+    print("\033[38;5;102m" + "="*80 + "\033[0m" + "\n")
 
 def _get_last_run_timestamp() -> datetime | None:
     """从文件检索上次运行的UTC时间戳。"""
@@ -119,7 +119,7 @@ def _generate_and_analyze_kline(vlm_analyzer, price_data, timeframe_alias, timef
         return None, None
         
     kline_image_path, data_time_range = kline_result
-    analysis = vlm_analyzer.analyze_kline_chart(kline_image_path, data_time_range, timeframe)
+    analysis = vlm_analyzer.analyze_kline_chart(kline_image_path, data_time_range, timeframe, price_data)
     LOGGER.info(f"{timeframe_alias} K线图VLM分析结果: {analysis}")
     return analysis, data_time_range
 
@@ -127,6 +127,7 @@ def run_trading_cycle(skip_llm: bool = False):
     """
     运行一个完整的交易决策周期。
     """
+    print("\033[38;5;109m========== 开始新一轮决策周期 ==========\033[0m")
     LOGGER.info("========== 开始新一轮决策周期 ==========")
     
     # 初始化邮件通知器
@@ -163,23 +164,27 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         # 步骤 1: 获取多时间框架数据和信号
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 1: 获取多时间框架数据和信号\033[0m")
         LOGGER.info("="*50 + "\n步骤 1: 获取多时间框架数据和信号")
         
         def collect_data():
             from btc_predictor.data import get_data
             from btc_predictor.config import DATA_CONFIG
             
-            # 获取主要时间框架数据 (例如 1h)
+            # 获取主要时间框架数据 (例如 1h)，增加到5天的数据量
+            limit_5_days_hourly = 5 * 24 
             short_term_data = get_data(
                 symbol=cast(str, DATA_CONFIG['symbol']), 
-                timeframe=cast(str, DATA_CONFIG['timeframe'])
+                timeframe=cast(str, DATA_CONFIG['timeframe']),
+                limit=limit_5_days_hourly
             )
             # 获取日线数据
-            daily_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1d')
+            daily_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1d', limit=200)
             # 获取周线数据
-            weekly_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1w')
+            weekly_data = get_data(symbol=cast(str, DATA_CONFIG['symbol']), timeframe='1w', limit=100)
 
-            price_data_for_ma = short_term_data.tail(200) if short_term_data is not None and not short_term_data.empty else None
+            price_data_for_ma = short_term_data.tail(limit_5_days_hourly) if short_term_data is not None and not short_term_data.empty else None
 
             quant_signal_data = get_live_trade_signal(
                 model_name=cast(str, config.DEFAULTS['model_name'])
@@ -200,6 +205,8 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         # 步骤 2: 初始化VLM分析器（仅用于K线图）
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 2: 初始化VLM分析器\033[0m")
         LOGGER.info("="*50 + "\n步骤 2: 初始化VLM分析器")
         vlm_analyzer = VLMAnalyzer()
         vlm_analyzer.cache.cleanup_expired_cache()
@@ -209,25 +216,52 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         # 步骤 3: 生成并分析多时间框架的K线图
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 3: 生成并分析多时间框架的K线图\033[0m")
         LOGGER.info("="*50 + "\n步骤 3: 生成并分析多时间框架的K线图")
         
-        def perform_vlm_analysis():
-            short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
-            daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data.tail(200) if daily_data is not None else None, "Daily", "1d")
-            weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data.tail(100) if weekly_data is not None else None, "Weekly", "1w")
-            return short_term_analysis, daily_analysis, weekly_analysis
-        
-        short_term_analysis, daily_analysis, weekly_analysis = track_process('vlm_analysis', perform_vlm_analysis)
+
+        # --- VLM分析前后动态切换代理 ---
+        import os
+        def save_proxy_env():
+            return {k: os.environ.get(k) for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']}
+        def clear_proxy_env():
+            for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
+                if k in os.environ:
+                    del os.environ[k]
+        def restore_proxy_env(env):
+            for k, v in env.items():
+                if v is not None:
+                    os.environ[k] = v
+                elif k in os.environ:
+                    del os.environ[k]
+
+        # 保存当前代理环境
+        _orig_proxy_env = save_proxy_env()
+        clear_proxy_env()
+        try:
+            def perform_vlm_analysis():
+                short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
+                daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data, "Daily", "1d")
+                weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data, "Weekly", "1w")
+                return short_term_analysis, daily_analysis, weekly_analysis
+            short_term_analysis, daily_analysis, weekly_analysis = track_process('vlm_analysis', perform_vlm_analysis)
+        finally:
+            restore_proxy_env(_orig_proxy_env)
 
         # ======================================================================
         # 步骤 4: 获取市场新闻情报
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 4: 获取市场新闻情报\033[0m")
         LOGGER.info("="*50 + "\n步骤 4: 获取市场新闻情报")
         market_news = track_process('news_intelligence', get_market_intelligence)
 
         # ======================================================================
         # 步骤 5: LLM决策引擎
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 5: 获取持仓并进行LLM决策\033[0m")
         LOGGER.info("="*50 + "\n步骤 5: 获取持仓并进行LLM决策")
         
         # 在决策前初始化交易器并获取当前仓位和余额
@@ -236,6 +270,7 @@ def run_trading_cycle(skip_llm: bool = False):
         current_balance = trader.get_balance('USDT')
         
         if skip_llm:
+            print("\033[38;5;180m已设置--skip-llm，跳过LLM决策分析。\033[0m")
             LOGGER.warning("已设置--skip-llm，跳过LLM决策分析。")
             final_decision = {
                 "decision": "HOLD",
@@ -268,6 +303,8 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         # 步骤 6: 保存并打印决策报告
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 6: 保存并打印决策报告\033[0m")
         LOGGER.info("="*50 + "\n步骤 6: 保存并打印决策报告")
         save_decision_report(final_decision)
         print_decision_report(final_decision)
@@ -275,6 +312,8 @@ def run_trading_cycle(skip_llm: bool = False):
         # ======================================================================
         # 步骤 7: 执行交易
         # ======================================================================
+        print("\033[38;5;152m" + "="*50 + "\033[0m")
+        print("\033[38;5;152m步骤 7: 执行交易\033[0m")
         LOGGER.info("="*50 + "\n步骤 7: 执行交易")
         # 深度类型校验与修正，防止类型污染
         if not isinstance(final_decision, dict):
@@ -344,6 +383,7 @@ def run_trading_cycle(skip_llm: bool = False):
             }
         )
     finally:
+        print("\033[38;5;109m========== 本轮决策周期结束 ==========\033[0m")
         LOGGER.info("========== 本轮决策周期结束 ==========\n")
         _save_last_run_timestamp()
 
@@ -354,25 +394,41 @@ def main():
     parser.add_argument('--skip-llm', action='store_true', help='跳过LLM的API调用，用于调试。')
     args = parser.parse_args()
 
+    # ====== 美观字符画 LOGO ======
+    btc_logo = r"""
+ ██████╗ ████████╗ ██████╗      ████████╗██████╗  █████╗ ██████╗ ██╗███╗   ██╗ ██████╗ 
+ ██╔══██╗╚══██╔══╝██╔════╝      ╚══██╔══╝██╔══██╗██╔══██╗██╔══██╗██║████╗  ██║██╔════╝ 
+ ██████╔╝   ██║   ██║              ██║   ██████╔╝███████║██║  ██║██║██╔██╗ ██║██║  ███╗
+ ██╔══██╗   ██║   ██║              ██║   ██╔══██╗██╔══██║██║  ██║██║██║╚██╗██║██║   ██║
+ ██████╔╝   ██║   ╚██████╗         ██║   ██║  ██║██║  ██║██████╔╝██║██║ ╚████║╚██████╔╝
+ ╚═════╝    ╚═╝    ╚═════╝         ╚═╝   ╚═╝  ╚═╝╚═╝  ╚═╝╚═════╝ ╚═╝╚═╝  ╚═══╝ ╚═════╝ 
+    """
+    print("\033[38;5;109m" + btc_logo + "\033[0m")  # 莫兰迪蓝绿色
+    print("\033[38;5;180m" + "★ BTC_TRADING 智能决策系统 v5.0 ★" + "\033[0m")  # 莫兰迪橄榄色
+    print("\033[38;5;102m" + "──────────────────────────────────────────────────────────────────────────────" + "\033[0m")  # 莫兰迪灰绿色
+
     job = partial(run_trading_cycle, skip_llm=args.skip_llm)
 
     if args.now:
-        LOGGER.info("接收到 --now 参数，立即执行一次决策周期...")
+        print("\033[38;5;143m[启动] 接收到 --now 参数，立即执行一次决策周期...\033[0m")  # 莫兰迪暖灰色
         job()
-        LOGGER.info("决策周期执行完毕，程序退出。")
+        print("\033[38;5;143m[完成] 决策周期执行完毕，程序退出。\033[0m")
         return
 
-    LOGGER.info("BTC智能决策系统 v5.0 主控程序已启动（调度模式）。")
-    
+    print("\033[38;5;152m[调度] BTC_TRADING 主控程序已启动（调度模式）\033[0m")  # 莫兰迪薄荷绿
+    print("\033[38;5;102m[调度] 每小时整点自动运行决策周期。\033[0m")  # 莫兰迪灰绿色
+    print("\033[38;5;102m[调度] 按 Ctrl+C 可随时退出。\033[0m")
+    print("\033[38;5;102m" + "──────────────────────────────────────────────────────────────────────────────" + "\033[0m")
+
     # 只用schedule的每小时整点调度
     schedule.every().hour.at(":00").do(job)
 
     last_run_utc = _get_last_run_timestamp()
     if not last_run_utc or (datetime.now(timezone.utc) - last_run_utc).total_seconds() > 3600:
-        LOGGER.info("首次运行或检测到错过的计划任务，立即执行一次决策周期...")
+        print("\033[38;5;180m[调度] 首次运行或检测到错过的计划任务，立即执行一次决策周期...\033[0m")  # 莫兰迪橄榄色
         job()
 
-    LOGGER.info("系统正在等待下一个调度时间点... (按 Ctrl+C 退出)")
+    print("\033[38;5;152m[调度] 系统正在等待下一个调度时间点... (按 Ctrl+C 退出)\033[0m")  # 莫兰迪薄荷绿
     while True:
         schedule.run_pending()
         time.sleep(1)
