@@ -1,4 +1,3 @@
-
 import pandas as pd
 import numpy as np
 import torch
@@ -174,4 +173,364 @@ def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
             "predicted_return": 0.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "info": f"获取信号时出错: {e}"
-        } 
+        }
+
+def run_rf4_backtest(ohlcv_df: pd.DataFrame, period: int = 14, order: int = 5, 
+                     position_size: float = 0.95, stop_loss_pct: float = 0.05, 
+                     dynamic_stop_loss: bool = False, atr_multiplier: float = 2.0, 
+                     quiet: bool = False) -> Dict[str, Any]:
+    """
+    基于predict.py的RF4回测引擎 - 使用信号生成函数进行回测
+    
+    Args:
+        ohlcv_df: OHLCV数据
+        period: RSI周期
+        order: 背离检测范围
+        position_size: 仓位大小 (0.95 = 95% 满仓)
+        stop_loss_pct: 止损百分比
+        dynamic_stop_loss: 是否使用动态止损
+        atr_multiplier: ATR倍数
+        quiet: 是否静默运行
+        
+    Returns:
+        Dict: 回测结果
+    """
+    from .rf4_features import generate_rf4_signals
+    from ta.volatility import average_true_range
+    
+    initial_capital = 100000
+    cash = initial_capital
+    btc_holdings = 0.0
+    commission = 0.001
+    trades = []
+    equity_curve = [initial_capital]
+    current_trade = None
+    
+    # 计算ATR用于动态止损
+    if dynamic_stop_loss:
+        ohlcv_df = ohlcv_df.copy()
+        ohlcv_df['atr'] = average_true_range(
+            high=ohlcv_df['high'], 
+            low=ohlcv_df['low'], 
+            close=ohlcv_df['close'], 
+            window=14
+        )
+    
+    # 生成信号
+    signals_df = generate_rf4_signals(ohlcv_df.copy(), period=period, order=order)
+    
+    for i in range(1, len(ohlcv_df)):
+        current_price = ohlcv_df['close'].iloc[i]
+        signal = signals_df['signal'].iloc[i]
+        current_equity = cash + btc_holdings * current_price
+        
+        # 检查止损
+        stop_loss_triggered = False
+        if current_trade is not None:
+            entry_price = current_trade['entry_price']
+            is_long = current_trade['direction'] == 'long'
+            
+            if dynamic_stop_loss and i < len(ohlcv_df) and 'atr' in ohlcv_df.columns:
+                current_atr = ohlcv_df['atr'].iloc[i]
+                if not np.isnan(current_atr):
+                    stop_loss_distance = current_atr * atr_multiplier
+                    stop_loss_price = entry_price - stop_loss_distance if is_long else entry_price + stop_loss_distance
+                else:
+                    stop_loss_price = entry_price * (1 - stop_loss_pct) if is_long else entry_price * (1 + stop_loss_pct)
+            else:
+                stop_loss_price = entry_price * (1 - stop_loss_pct) if is_long else entry_price * (1 + stop_loss_pct)
+            
+            if (is_long and current_price <= stop_loss_price) or (not is_long and current_price >= stop_loss_price):
+                stop_loss_triggered = True
+        
+        # 平仓条件
+        should_exit = (current_trade is not None and 
+                      ((current_trade['direction'] == 'long' and signal == -1) or
+                       (current_trade['direction'] == 'short' and signal == 1) or
+                       stop_loss_triggered))
+        
+        if should_exit:
+            entry_price = current_trade['entry_price']
+            trade_size = current_trade['size']
+            is_long = current_trade['direction'] == 'long'
+            
+            if is_long:
+                cash += trade_size * current_price * (1 - commission)
+                btc_holdings -= trade_size
+                pnl = trade_size * (current_price - entry_price) * (1 - commission) - trade_size * entry_price * commission
+            else:
+                cash -= trade_size * current_price * (1 + commission)
+                btc_holdings += trade_size  # 做空平仓时归还BTC
+                pnl = trade_size * (entry_price - current_price) - trade_size * entry_price * commission - trade_size * current_price * commission
+            
+            current_trade.update({
+                'exit_price': current_price,
+                'exit_date': ohlcv_df.index[i],
+                'pnl': pnl,
+                'return_pct': (pnl / current_trade['investment']) * 100,
+                'exit_reason': 'stop_loss' if stop_loss_triggered else 'signal'
+            })
+            trades.append(current_trade)
+            current_trade = None
+        
+        # 开仓条件
+        if current_trade is None and signal != 0:
+            trade_value = current_equity * position_size
+            trade_size = trade_value / current_price
+            
+            if signal == 1:  # 做多
+                if cash >= trade_value * (1 + commission):
+                    cash -= trade_value * (1 + commission)
+                    btc_holdings += trade_size
+                    current_trade = {
+                        'entry_date': ohlcv_df.index[i],
+                        'entry_price': current_price,
+                        'size': trade_size,
+                        'direction': 'long',
+                        'investment': trade_value
+                    }
+            elif signal == -1:  # 做空
+                cash += trade_value * (1 - commission)
+                btc_holdings -= trade_size  # 做空时BTC持仓为负数
+                current_trade = {
+                    'entry_date': ohlcv_df.index[i],
+                    'entry_price': current_price,
+                    'size': trade_size,
+                    'direction': 'short',
+                    'investment': trade_value
+                }
+        
+        equity_curve.append(cash + btc_holdings * current_price)
+    
+    # 计算结果
+    final_equity = equity_curve[-1]
+    total_return = (final_equity / initial_capital - 1) * 100
+    
+    trades_df = pd.DataFrame(trades)
+    total_trades = len(trades_df)
+    win_rate = 0
+    profit_factor = 0
+    
+    if total_trades > 0:
+        wins = trades_df[trades_df['pnl'] > 0]
+        losses = trades_df[trades_df['pnl'] <= 0]
+        win_rate = len(wins) / total_trades * 100
+        
+        sum_of_wins = wins['pnl'].sum()
+        sum_of_losses = abs(losses['pnl'].sum())
+        profit_factor = sum_of_wins / sum_of_losses if sum_of_losses > 0 else float('inf')
+    
+    # 计算最大回撤
+    equity_series = pd.Series(equity_curve)
+    rolling_max = equity_series.cummax()
+    drawdown = (equity_series - rolling_max) / rolling_max
+    max_drawdown = abs(drawdown.min()) * 100 if not drawdown.empty else 0
+    
+    results = {
+        "total_return": total_return,
+        "total_trades": total_trades,
+        "win_rate": win_rate,
+        "profit_factor": profit_factor,
+        "max_drawdown": max_drawdown,
+        "final_equity": final_equity
+    }
+    
+    if not quiet:
+        print("\n--- RF4背离策略回测结果 ---")
+        config_str = f"period={period}, order={order}, 仓位={position_size*100:.0f}%"
+        if dynamic_stop_loss:
+            config_str += f", 动态止损(ATR*{atr_multiplier:.1f})"
+        else:
+            config_str += f", 止损={stop_loss_pct*100:.1f}%"
+        print(f"参数: {config_str}")
+        print(f"回测周期: {ohlcv_df.index.min()} 到 {ohlcv_df.index.max()}")
+        print(f"最终资产: ${results['final_equity']:,.2f}")
+        print(f"总回报率: {results['total_return']:.2f}%")
+        print(f"最大回撤: {results['max_drawdown']:.2f}%")
+        print(f"总交易次数: {results['total_trades']}")
+        print(f"胜率: {results['win_rate']:.2f}%")
+        print(f"盈亏比: {results['profit_factor']:.2f}")
+    
+    return results
+
+def get_rf4_signal(period: int = 14, order: int = 5) -> Optional[Dict[str, Any]]:
+    """
+    获取RF4背离策略的实时交易信号
+    
+    Args:
+        period: RSI周期
+        order: 背离检测的波峰/波谷查找范围
+    
+    Returns:
+        Dict: 包含信号、当前价格、时间戳等信息的字典
+    """
+    from .data import get_data
+    from .config import DATA_CONFIG
+    from .rf4_features import generate_rf4_signals
+    
+    LOGGER.info(f"正在获取RF4背离策略信号 (period={period}, order={order})...")
+    
+    try:
+        # 获取足够的历史数据以计算背离
+        lookback_periods = max(order * 10, 100)  # 确保有足够数据检测背离
+        price_data = get_data(
+            symbol=DATA_CONFIG['symbol'],
+            timeframe=DATA_CONFIG['timeframe'],
+            limit=lookback_periods
+        )
+        
+        if price_data is None or len(price_data) < lookback_periods:
+            LOGGER.warning("获取的数据不足以计算RF4指标，无法生成信号。")
+            return None
+        
+        # 生成RF4信号
+        signals_df = generate_rf4_signals(price_data.copy(), period=period, order=order)
+        
+        # 安全获取最新信号
+        if signals_df.empty or len(signals_df) == 0:
+            LOGGER.warning("信号生成失败，返回持有信号")
+            return {
+                "signal": "HOLD",
+                "action": "持有",
+                "current_price": float(price_data['close'].iloc[-1]) if not price_data.empty else 0.0,
+                "timestamp": price_data.index[-1].isoformat() if not price_data.empty else datetime.now(timezone.utc).isoformat(),
+                "error": "信号生成失败"
+            }
+        
+        latest_signal = signals_df['signal'].iloc[-1]
+        current_price = price_data['close'].iloc[-1]
+        
+        # 验证信号值
+        if pd.isna(latest_signal):
+            latest_signal = 0  # NaN转为持有信号
+        
+        # 转换信号
+        if latest_signal == 1:
+            signal = "BUY"
+            action = "做多"
+        elif latest_signal == -1:
+            signal = "SELL" 
+            action = "做空"
+        else:
+            signal = "HOLD"
+            action = "持有"
+        
+        result = {
+            "signal": signal,
+            "action": action,
+            "current_price": float(current_price),
+            "timestamp": price_data.index[-1].isoformat(),
+            "rf4_value": float(signals_df['rf4'].iloc[-1]) if 'rf4' in signals_df.columns else None,
+            "bullish_divergence": bool(signals_df['bullish_divergence'].iloc[-1]) if 'bullish_divergence' in signals_df.columns else False,
+            "bearish_divergence": bool(signals_df['bearish_divergence'].iloc[-1]) if 'bearish_divergence' in signals_df.columns else False
+        }
+        
+        LOGGER.info(f"RF4信号获取成功: {result['signal']} - {result['action']}")
+        return result
+        
+    except Exception as e:
+        LOGGER.error(f"获取RF4信号时发生错误: {e}")
+        return {
+            "signal": "HOLD",
+            "action": "持有",
+            "current_price": 0.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": f"获取RF4信号时出错: {e}"
+        }
+
+def optimize_rf4_parameters(days: int = 365, n_trials: int = 50) -> Dict[str, Any]:
+    """
+    RF4策略参数优化
+    
+    Args:
+        days: 回测天数
+        n_trials: 优化试验次数
+        
+    Returns:
+        Dict: 优化结果包含最佳参数和表现
+    """
+    try:
+        import optuna
+        from .data import get_data
+        from .config import DATA_CONFIG
+        from datetime import timedelta
+        
+        # 获取数据
+        since_date = datetime.now() - timedelta(days=days)
+        since_str = since_date.strftime('%Y-%m-%dT%H:%M:%SZ')
+        
+        ohlcv_df = get_data(
+            symbol=DATA_CONFIG['symbol'],
+            timeframe=DATA_CONFIG['timeframe'],
+            since=since_str
+        )
+        
+        if ohlcv_df is None or ohlcv_df.empty:
+            return {"error": "无法获取数据进行优化"}
+        
+        # 修正时区
+        since_ts = pd.to_datetime(since_str)
+        if ohlcv_df.index.tz is None:
+            ohlcv_df.index = ohlcv_df.index.tz_localize('UTC')
+        ohlcv_df = ohlcv_df[ohlcv_df.index >= since_ts]
+        
+        def objective(trial):
+            period = trial.suggest_int('period', 5, 50)
+            order = trial.suggest_int('order', 3, 20)
+            position_size = trial.suggest_float('position_size', 0.1, 0.95, step=0.05)
+            stop_loss_pct = trial.suggest_float('stop_loss_pct', 0.01, 0.10, step=0.005)
+            
+            # 动态止损选择
+            use_dynamic_stop = trial.suggest_categorical('dynamic_stop_loss', [True, False])
+            atr_multiplier = trial.suggest_float('atr_multiplier', 1.0, 4.0, step=0.25) if use_dynamic_stop else 2.0
+            
+            try:
+                results = run_rf4_backtest(
+                    ohlcv_df,
+                    period=period,
+                    order=order,
+                    position_size=position_size,
+                    stop_loss_pct=stop_loss_pct,
+                    dynamic_stop_loss=use_dynamic_stop,
+                    atr_multiplier=atr_multiplier,
+                    quiet=True
+                )
+                
+                # 风险调整收益 - 兼顾收益和回撤
+                risk_adjusted_return = results['total_return'] / max(results['max_drawdown'], 1.0)
+                return risk_adjusted_return
+                
+            except Exception:
+                return -1000  # 回测失败返回极低分数
+        
+        # 运行优化
+        study = optuna.create_study(direction='maximize')
+        study.enqueue_trial({'period': 14, 'order': 5, 'position_size': 0.95, 'stop_loss_pct': 0.05, 'dynamic_stop_loss': False})
+        study.optimize(objective, n_trials=n_trials)
+        
+        # 使用最佳参数运行最终回测
+        best_params = study.best_params
+        final_results = run_rf4_backtest(
+            ohlcv_df,
+            period=best_params['period'],
+            order=best_params['order'],
+            position_size=best_params['position_size'],
+            stop_loss_pct=best_params['stop_loss_pct'],
+            dynamic_stop_loss=best_params['dynamic_stop_loss'],
+            atr_multiplier=best_params.get('atr_multiplier', 2.0),
+            quiet=True
+        )
+        
+        return {
+            "best_params": best_params,
+            "best_score": study.best_value,
+            "backtest_results": final_results,
+            "data_period": f"{days}天",
+            "trials_completed": len(study.trials),
+            "optimization_success": True
+        }
+        
+    except ImportError:
+        return {"error": "需要安装optuna: pip install optuna"}
+    except Exception as e:
+        return {"error": f"优化过程出错: {str(e)}"}
