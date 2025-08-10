@@ -8,7 +8,7 @@ import schedule
 from functools import partial
 
 import config
-from btc_predictor.predict import get_live_trade_signal
+from btc_predictor.predict import get_live_trade_signal, get_rf4_signal
 from btc_predictor.utils import LOGGER
 from btc_predictor.kline_plot import create_kline_image
 from data_ingestion.news_feeds import fetch_coindesk_news
@@ -186,17 +186,33 @@ def run_trading_cycle(skip_llm: bool = False):
 
             price_data_for_ma = short_term_data.tail(limit_5_days_hourly) if short_term_data is not None and not short_term_data.empty else None
 
-            quant_signal_data = get_live_trade_signal(
-                model_name=cast(str, config.DEFAULTS['model_name'])
-            )
-            if quant_signal_data is None:
-                LOGGER.error("无法获取量化信号，将使用默认的HOLD信号继续。")
+            # 获取RF4背离策略信号（使用优化后的参数）
+            rf4_signal_data = get_rf4_signal(period=15, order=5)
+            if rf4_signal_data is None:
+                LOGGER.error("无法获取RF4信号，将使用默认的HOLD信号继续。")
                 quant_signal_data = {
                     "signal": "HOLD",
                     "predicted_return": 0.0,
-                    "info": "信号获取失败"
+                    "info": "RF4信号获取失败"
                 }
-            LOGGER.info(f"获取到量化模型信号: {quant_signal_data}")
+            else:
+                # 转换RF4信号格式以兼容现有系统
+                quant_signal_data = {
+                    "signal": rf4_signal_data["signal"],
+                    "predicted_return": 0.0,  # RF4策略不提供预测收益率
+                    "current_price": rf4_signal_data["current_price"],
+                    "timestamp": rf4_signal_data["timestamp"],
+                    "info": f"RF4背离策略信号 - {rf4_signal_data['action']}"
+                }
+                # 如果有RSI值，添加到信息中
+                if rf4_signal_data.get('rf4_value'):
+                    quant_signal_data["rf4_rsi"] = rf4_signal_data['rf4_value']
+                if rf4_signal_data.get('bullish_divergence'):
+                    quant_signal_data["bullish_divergence"] = True
+                if rf4_signal_data.get('bearish_divergence'):
+                    quant_signal_data["bearish_divergence"] = True
+            
+            LOGGER.info(f"获取到RF4策略信号: {quant_signal_data}")
             
             return short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signal_data
         
