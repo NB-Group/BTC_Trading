@@ -166,13 +166,15 @@ def generate_rf4_signals(df: pd.DataFrame, period: int = 14, order: int = 5) -> 
         # 任何看跌背离都卖出
         df.loc[df['bearish_divergence'] == 1, 'signal'] = -1
         
-        # 两次连续的看涨背离买入
-        bullish_dates = df[df['bullish_divergence'] == 1].index
-        if len(bullish_dates) >= 2:
-            for i in range(1, len(bullish_dates)):
-                # 检查背离之间的时间间隔，避免过于频繁的信号
-                if i < len(bullish_dates):
-                    df.loc[bullish_dates[i], 'signal'] = 1
+        # 简化买入信号：任何单次看涨背离都视为买入信号
+        df.loc[df['bullish_divergence'] == 1, 'signal'] = 1
+        # # 两次连续的看涨背离买入 (逻辑过于复杂且不明确，暂时简化)
+        # bullish_dates = df[df['bullish_divergence'] == 1].index
+        # if len(bullish_dates) >= 2:
+        #     for i in range(1, len(bullish_dates)):
+        #         # 检查背离之间的时间间隔，避免过于频繁的信号
+        #         if i < len(bullish_dates):
+        #             df.loc[bullish_dates[i], 'signal'] = 1
 
         # 返回包含所有列的DataFrame，方便调试
         return df[['signal', 'rf4', 'bullish_divergence', 'bearish_divergence']]
