@@ -8,7 +8,7 @@ import schedule
 from functools import partial
 
 import config
-from btc_predictor.predict import get_live_trade_signal, get_rf4_signal
+from btc_predictor.predict import get_live_trade_signal, get_rf4_signal, get_bollinger_breakout_signal
 from btc_predictor.utils import LOGGER
 from btc_predictor.kline_plot import create_kline_image
 from data_ingestion.news_feeds import fetch_coindesk_news
@@ -186,35 +186,54 @@ def run_trading_cycle(skip_llm: bool = False):
 
             price_data_for_ma = short_term_data.tail(limit_5_days_hourly) if short_term_data is not None and not short_term_data.empty else None
 
-            # 获取RF4背离策略信号（使用优化后的参数）
+            # --- 获取多个量化策略信号 ---
+            quant_signals = []
+
+            # 1. 获取RF4背离策略信号
             rf4_signal_data = get_rf4_signal(period=15, order=5)
-            if rf4_signal_data is None:
-                LOGGER.error("无法获取RF4信号，将使用默认的HOLD信号继续。")
-                quant_signal_data = {
-                    "signal": "HOLD",
-                    "predicted_return": 0.0,
-                    "info": "RF4信号获取失败"
-                }
-            else:
+            if rf4_signal_data:
                 # 转换RF4信号格式以兼容现有系统
-                quant_signal_data = {
+                rf4_formatted = {
                     "signal": rf4_signal_data["signal"],
                     "predicted_return": 0.0,  # RF4策略不提供预测收益率
                     "current_price": rf4_signal_data["current_price"],
                     "timestamp": rf4_signal_data["timestamp"],
-                    "info": f"RF4背离策略信号 - {rf4_signal_data['action']}"
+                    "info": f"RF4背离策略信号 - {rf4_signal_data['action']}",
+                    "strategy": "RF4_Divergence"
                 }
-                # 如果有RSI值，添加到信息中
-                if rf4_signal_data.get('rf4_value'):
-                    quant_signal_data["rf4_rsi"] = rf4_signal_data['rf4_value']
-                if rf4_signal_data.get('bullish_divergence'):
-                    quant_signal_data["bullish_divergence"] = True
-                if rf4_signal_data.get('bearish_divergence'):
-                    quant_signal_data["bearish_divergence"] = True
+                quant_signals.append(rf4_formatted)
+                LOGGER.info(f"获取到RF4策略信号: {rf4_formatted}")
+            else:
+                LOGGER.warning("无法获取RF4信号。")
+
+            # 2. 获取布林带突破策略信号
+            bb_signal_data = get_bollinger_breakout_signal(window=20, std_dev=2.0)
+            if bb_signal_data:
+                bb_formatted = {
+                    "signal": bb_signal_data["signal"],
+                    "predicted_return": 0.0,
+                    "current_price": bb_signal_data["current_price"],
+                    "timestamp": bb_signal_data["timestamp"],
+                    "info": f"布林带突破策略 - {bb_signal_data['action']}",
+                    "strategy": "Bollinger_Breakout"
+                }
+                quant_signals.append(bb_formatted)
+                LOGGER.info(f"获取到布林带突破策略信号: {bb_formatted}")
+            else:
+                LOGGER.warning("无法获取布林带突破信号。")
             
-            LOGGER.info(f"获取到RF4策略信号: {quant_signal_data}")
-            
-            return short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signal_data
+            # 如果没有任何信号，则创建一个默认的HOLD信号
+            if not quant_signals:
+                LOGGER.error("所有量化策略均未生成有效信号，将使用默认的HOLD信号继续。")
+                default_signal = {
+                    "signal": "HOLD",
+                    "predicted_return": 0.0,
+                    "info": "所有量化模型信号获取失败",
+                    "strategy": "System_Default"
+                }
+                quant_signals.append(default_signal)
+
+            return short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signals
         
         short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data)
 
@@ -303,7 +322,7 @@ def run_trading_cycle(skip_llm: bool = False):
             def perform_llm_decision():
                 analyzer = DeepSeekAnalyzer()
                 return analyzer.get_trade_decision(
-                    quant_signal=quant_signal_data,
+                    quant_signals=quant_signal_data, # 变量名改为 quant_signals
                     twitter_data=market_news, 
                     kline_analysis={
                         "short_term": short_term_analysis,

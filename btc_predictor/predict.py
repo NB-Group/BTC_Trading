@@ -534,3 +534,78 @@ def optimize_rf4_parameters(days: int = 365, n_trials: int = 50) -> Dict[str, An
         return {"error": "需要安装optuna: pip install optuna"}
     except Exception as e:
         return {"error": f"优化过程出错: {str(e)}"}
+
+
+def get_bollinger_breakout_signal(window: int = 20, std_dev: float = 2.0) -> Optional[Dict[str, Any]]:
+    """
+    获取布林带突破策略的实时交易信号。
+
+    Args:
+        window (int): 布林带的时间窗口。
+        std_dev (float): 布林带的标准差倍数。
+
+    Returns:
+        Dict: 包含信号、当前价格、时间戳等信息的字典。
+    """
+    from .data import get_data
+    from .config import DATA_CONFIG
+    from ta.volatility import BollingerBands
+
+    LOGGER.info(f"正在获取布林带突破策略信号 (window={window}, std_dev={std_dev})...")
+
+    try:
+        # 获取足够的数据来计算布林带
+        price_data = get_data(
+            symbol=DATA_CONFIG['symbol'],
+            timeframe=DATA_CONFIG['timeframe'],
+            limit=window * 2  # 获取窗口两倍的数据量以确保准确性
+        )
+
+        if price_data is None or len(price_data) < window:
+            LOGGER.warning("获取的数据不足以计算布林带，无法生成信号。")
+            return None
+
+        # 计算布林带
+        indicator_bb = BollingerBands(close=price_data['close'], window=window, window_dev=std_dev)
+        df = price_data.copy()
+        df['bb_upper'] = indicator_bb.bollinger_hband()
+        df['bb_lower'] = indicator_bb.bollinger_lband()
+
+        # 获取最新的数据点
+        latest = df.iloc[-1]
+        previous = df.iloc[-2]
+
+        signal = "HOLD"
+        action = "持有"
+
+        # 突破上轨
+        if previous['close'] <= previous['bb_upper'] and latest['close'] > latest['bb_upper']:
+            signal = "BUY"
+            action = "做多 (布林带上轨突破)"
+        # 跌破下轨
+        elif previous['close'] >= previous['bb_lower'] and latest['close'] < latest['bb_lower']:
+            signal = "SELL"
+            action = "做空 (布林带下轨跌破)"
+
+        result = {
+            "signal": signal,
+            "action": action,
+            "current_price": float(latest['close']),
+            "timestamp": latest.name.isoformat(),
+            "strategy": "Bollinger_Breakout",
+            "params": f"window={window}, std_dev={std_dev}"
+        }
+
+        LOGGER.info(f"布林带突破信号获取成功: {signal} - {action}")
+        return result
+
+    except Exception as e:
+        LOGGER.error(f"获取布林带突破信号时发生错误: {e}")
+        return {
+            "signal": "HOLD",
+            "action": "持有",
+            "current_price": 0.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": f"获取布林带信号时出错: {e}",
+            "strategy": "Bollinger_Breakout"
+        }

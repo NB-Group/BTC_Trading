@@ -69,7 +69,7 @@ class DeepSeekAnalyzer:
 
     def get_trade_decision(
             self, 
-            quant_signal: Dict[str, Any], 
+            quant_signals: List[Dict[str, Any]], 
             twitter_data: List[Dict[str, Any]],
             kline_analysis: Dict[str, Optional[str]],
             current_position: Optional[Dict[str, Any]] = None,
@@ -78,7 +78,7 @@ class DeepSeekAnalyzer:
         """
         根据所有输入信息，请求DeepSeek LLM做出最终的交易决策。
         """
-        prompt = self._construct_prompt(quant_signal, twitter_data, kline_analysis, current_position, current_balance)
+        prompt = self._construct_prompt(quant_signals, twitter_data, kline_analysis, current_position, current_balance)
         return self._make_api_call(prompt)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -154,7 +154,7 @@ class DeepSeekAnalyzer:
 
     def _construct_prompt(
         self, 
-        quant_signal: Dict[str, Any], 
+        quant_signals: List[Dict[str, Any]], 
         twitter_data: List[Dict[str, Any]],
         kline_analysis: Dict[str, Optional[str]],
         current_position: Optional[Dict[str, Any]] = None,
@@ -163,7 +163,7 @@ class DeepSeekAnalyzer:
         """
         构建一个更精细化的提示词，区分不同来源的推文并强调时效性。
         """
-        signal_part = self._format_quant_signal(quant_signal)
+        signal_part = self._format_quant_signals(quant_signals) # 修改调用
         twitter_part = self._format_twitter_data(twitter_data)
         kline_part = self._format_kline_analysis(kline_analysis)
         position_part = self._format_position_info(current_position)
@@ -183,7 +183,12 @@ class DeepSeekAnalyzer:
         
         # 获取当前UTC时间和市场价格
         current_time_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z')
-        current_price = quant_signal.get('current_price')
+        
+        # 从信号列表中获取当前价格 (选择第一个信号的价格作为代表)
+        current_price = None
+        if quant_signals and isinstance(quant_signals, list) and quant_signals[0].get('current_price'):
+            current_price = quant_signals[0].get('current_price')
+
         market_context_part = f"当前BTC/USDT市场价格: **${current_price:.2f}**" if current_price else "无法获取当前市场价格。"
 
         system_prompt = f"""
@@ -193,10 +198,11 @@ class DeepSeekAnalyzer:
 # 核心原则
 1.  **顺势与机会捕捉 (最高优先级)**:
     *   **默认中性**: 在证据不足或信号冲突时，首选 `HOLD`，避免勉强进场。
+    *   **震荡行情处理**: 当VLM分析识别出市场处于横盘震荡（例如布林带收窄，价格在区间内波动）时，主要策略应为 `HOLD`，耐心等待明确的突破信号，避免在区间内被反复止损。
     *   **牛市思维**: 在市场整体上涨或有强烈看涨信号时（如VLM分析显示多头排列、关键支撑位反弹），优先考虑 **LONG** 机会；在无明确利空的情况下，不因局部回撤而做空。
     *   **空头门槛（更高要求）**: 只有在以下至少两项同时满足时，才可考虑 `SHORT`：
         1) VLM 1H 结论为明确看跌并给出关键位被跌破；
-        2) 内部量化模型为 `SELL` 或出现强烈的空头动量信号；
+        2) 内部量化模型矩阵中至少一个模型为 `SELL` 或出现强烈的空头动量信号；
         3) 新闻情报出现突发性实质性利空（可验证来源）；
         4) 更高周期（日线/周线）不处于明确的多头趋势，或多头趋势出现关键位失守。
     *   **果断出击**: 当多个来源（VLM、量化信号、新闻）指向同一方向时，应果断决策，提高置信度。
@@ -229,7 +235,10 @@ class DeepSeekAnalyzer:
   - **持有逻辑**: 如果持有仓位与短期趋势方向一致，即使有小幅回调，也应继续持有，以捕捉更大的波动。
 
 # 信息解读
-- **内部量化模型**: 该信号基于MA均线交叉，可作为趋势确认的辅助工具。当它给出 `HOLD` 以外的信号时，应予以重视。
+- **内部量化模型矩阵**: 你会收到一个包含多个策略信号的列表。每个信号都有独立的来源和逻辑。
+  - **信号一致性**: 如果多个策略（如RF4背离和布林带突破）发出相同方向的信号（都是BUY或都是SELL），这是一个强烈的共振信号，应显著提高决策置信度。
+  - **信号冲突**: 如果策略信号相互矛盾（一个BUY，一个SELL），这表明市场方向不明朗，风险较高。在这种情况下，应优先考虑 `HOLD`，或至少降低仓位和杠杆，并更加依赖VLM对当前K线形态的直接解读来打破僵局。
+  - **单一信号**: 如果只有一个策略发出明确信号，应将其视为重要参考，但不是决定性因素，需要与其他信息源（VLM K线分析、新闻）进行交叉验证。
 - **VLM K线分析**: 这是短线决策的核心依据。`1H K线分析` 权重最高。
 - **新闻情报**: 重点关注能引发市场情绪剧烈波动的突发新闻。
 
@@ -267,22 +276,24 @@ class DeepSeekAnalyzer:
 """
         return system_prompt.strip()
 
-    def _format_quant_signal(self, quant_signal: Dict[str, Any]) -> str:
-        """格式化量化信号部分。"""
-        signal_info = quant_signal.get('info', '当前无明确金叉/死叉信号。')
-        signal_type = quant_signal.get('signal', 'HOLD')
-        predicted_return = quant_signal.get('predicted_return', 0.0)
-        current_price = quant_signal.get('current_price')
+    def _format_quant_signals(self, quant_signals: List[Dict[str, Any]]) -> str:
+        """格式化多个量化策略的信号部分。"""
+        if not quant_signals:
+            return "### 内部量化模型矩阵\n- 未提供任何量化信号。\n"
 
-        quant_part = "### 内部量化模型信号\n"
-        if signal_type in ['BUY', 'SELL']:
+        quant_part = "### 内部量化模型矩阵\n"
+        for signal_data in quant_signals:
+            strategy = signal_data.get('strategy', '未知策略')
+            signal_type = signal_data.get('signal', 'HOLD')
+            info = signal_data.get('info', '无详细信息。')
+            current_price = signal_data.get('current_price')
+
+            quant_part += f"\n#### 策略: {strategy}\n"
             quant_part += f"- **信号类型**: **{signal_type}**\n"
-            quant_part += f"- **模型预测回报率**: **{predicted_return:.4f}%**\n"
-        else:
-            quant_part += "- **信号类型**: **HOLD (无明确交易信号)**\n"
-        quant_part += f"- **模型分析**: {signal_info}\n"
-        if current_price:
-            quant_part += f"- **参考价格**: ${current_price:.2f}\n"
+            quant_part += f"- **策略分析**: {info}\n"
+            if current_price:
+                quant_part += f"- **参考价格**: ${current_price:.2f}\n"
+        
         return quant_part
 
     def _format_twitter_data(self, twitter_data: List[Dict[str, Any]]) -> str:
@@ -325,7 +336,7 @@ class DeepSeekAnalyzer:
         """格式化当前持仓信息。"""
         position_part = "## 1. 当前持仓状态\n\n"
         if not position_data or not position_data.get('posSide'):
-            position_part += "当前 **空仓**。\n"
+            position_part += "当前**无持仓**。\n"
             return position_part
 
         side = position_data.get('posSide')
@@ -345,7 +356,7 @@ class DeepSeekAnalyzer:
             elif pos_val < 0:
                 position_part += f"- **持仓方向**: **做空 (SHORT, net模式, pos={pos_val})**\n"
             else:
-                position_part += "当前 **空仓**。\n"
+                position_part += "当前**无持仓**。\n"
                 return position_part
         elif side == 'long':
             position_part += f"- **持仓方向**: **做多 (LONG)**\n"
@@ -417,12 +428,20 @@ if __name__ == '__main__':
     LOGGER.info("--- 运行 DeepSeekAnalyzer 独立测试 ---")
     
     # 模拟测试数据
-    test_quant_signal = {
-        "signal": "HOLD",
-        "predicted_return": 0.0,
-        "info": "测试量化信号",
-        "current_price": 30000.0
-    }
+    test_quant_signals = [
+        {
+            "strategy": "RF4背离",
+            "signal": "BUY",
+            "info": "测试RF4背离信号",
+            "current_price": 30000.0
+        },
+        {
+            "strategy": "布林带突破",
+            "signal": "SELL",
+            "info": "测试布林带突破信号",
+            "current_price": 30500.0
+        }
+    ]
     
     test_twitter_data = [
         {
@@ -443,7 +462,7 @@ if __name__ == '__main__':
     try:
         analyzer = DeepSeekAnalyzer()
         result = analyzer.get_trade_decision(
-            quant_signal=test_quant_signal,
+            quant_signals=test_quant_signals,
             twitter_data=test_twitter_data,
             kline_analysis=test_kline_analysis,
             current_position=None,

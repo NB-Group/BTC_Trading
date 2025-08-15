@@ -12,6 +12,30 @@ import config
 from btc_predictor.utils import LOGGER
 from .vlm_cache import VLMCache # 导入缓存管理器
 
+# --- Sanity Check Helper ---
+def _is_sane(text: str) -> bool:
+    """
+    对VLM的输出进行基本的理智检查，防止乱码污染下游。
+    """
+    if not isinstance(text, str) or not text.strip():
+        return False
+    
+    # 检查是否包含多种语言的特征词 (这是一个启发式方法)
+    forbidden_keywords = [
+        'architects', 'settle', 'gracias', 'спасибо', 'ありがとうございました', '안녕하세요'
+    ]
+    text_lower = text.lower()
+    if any(keyword in text_lower for keyword in forbidden_keywords):
+        return False
+        
+    # 检查是否有过多不常见的非ASCII字符（排除中文）
+    import re
+    non_ascii_chars = re.findall(r'[^\u0000-\u007F\u4e00-\u9fa5\u3000-\u303F\uff00-\uffef]', text)
+    if len(non_ascii_chars) > 10: # 允许少量特殊符号
+        return False
+
+    return True
+
 class VLMAnalyzer:
     """
     一个封装了视觉语言模型（VLM）分析功能的类。
@@ -23,8 +47,8 @@ class VLMAnalyzer:
         self.api_key = deepseek_config.get('api_key')
         
         # 为不同任务定义不同的模型
-        self.kline_model = "Qwen/Qwen2.5-VL-72B-Instruct"  # K线图分析使用72B模型
-        self.tweet_model = "Pro/Qwen/Qwen2.5-VL-7B-Instruct"  # 推文图片分析使用7B模型
+        self.kline_model = "zai-org/GLM-4.5V"  # K线图分析模型
+        self.tweet_model = "zai-org/GLM-4.5V"  # 推文图片分析也使用新模型
         
         if not self.api_key or 'YOUR' in self.api_key:
             LOGGER.warning("VLM (DeepSeek) API key 未配置，VLM分析功能将被跳过。")
@@ -79,7 +103,8 @@ class VLMAnalyzer:
                 {"type": "text", "text": prompt_text},
                 {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_media}"}}
             ]}],
-            "max_tokens": 2000 # 为K线图分析增加token上限
+            "max_tokens": 2000, # 为K线图分析增加token上限
+            "temperature": 0.2 # 降低温度，减少幻觉和乱码
         }
 
         # --- 代理设置处理 ---
@@ -269,6 +294,7 @@ class VLMAnalyzer:
         
         prompt_text = f"""
 你是一名精通技术分析的资深量化交易员。请仔细分析这张BTC/USDT的{timeframe_info['name']}K线图。
+你的分析必须只使用简体中文。
 {price_range_info}
 **图表指标说明:**
 *   **K线 (Candlestick)**: 绿色(#26A69A)为阳线, 红色(#EF5350)为阴线。
@@ -294,7 +320,7 @@ class VLMAnalyzer:
 **你的分析任务:**
 1.  **当前趋势与动能**:
     *   结合MA5, MA10, MA20, MA60的排列（多头/空头排列）和价格位置，判断当前主要趋势（上升/下降/盘整）。
-    *   价格与布林带三轨的关系如何？（例如：在中轨上方运行，触及上轨，跌破下轨等），这揭示了什么趋势强度和波动性？
+    *   价格与布林带三轨的关系如何？（例如：在中轨上方运行，触及上轨，跌破下轨等），这揭示了什么趋势强度和波动性？ **特别注意布林带是否收窄，这是市场进入横盘震荡的重要信号。**
 2.  **关键形态与价位**:
     *   是否存在头肩、双顶/底、三角形、旗形等经典技术形态？
     *   图中的关键支撑位和阻力位在哪里？（可结合均线、布林带轨道和前期高低点判断）
@@ -310,9 +336,14 @@ class VLMAnalyzer:
 """
         try:
             analysis_result = self._analyze_with_vlm(base64_media, mime_type, prompt_text, self.kline_model)
-            
+
+            # --- 对VLM输出进行理智检查 ---
+            if not _is_sane(analysis_result):
+                LOGGER.warning(f"VLM输出未通过理智检查，内容可能为乱码。原始输出: '{analysis_result[:200]}...'")
+                analysis_result = "VLM分析结果异常（可能为乱码），本次分析已忽略。"
+
             # 将结果缓存起来（如果分析成功）
-            if analysis_result and not analysis_result.startswith("VLM API请求失败"):
+            if analysis_result and "VLM分析" not in analysis_result: # 仅在非错误/警告信息时缓存
                 info_text = data_time_range or f"K线图文件: {os.path.basename(image_path)}"
                 self.cache.set_kline_analysis(data_hash, info_text, analysis_result)
             
