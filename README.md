@@ -159,18 +159,11 @@ MACRO_ECONOMIC_KEYWORDS = [
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
+本项目采用 AGPL 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情
 
 ## ⚠️ 免责声明
 
 本软件仅供学习和研究使用。加密货币交易存在高风险，可能导致资金损失。使用本软件进行实际交易的风险由用户自行承担。作者不对任何交易损失承担责任。
-
-## 📞 联系方式
-
-如有问题或建议，请通过以下方式联系：
-
-- 提交 Issue: [GitHub Issues](https://github.com/yourusername/btc-trading-system/issues)
-- 邮箱: your.email@example.com
 
 ---
 
