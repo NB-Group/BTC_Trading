@@ -110,7 +110,7 @@ API_KEYS = {
 # 期货交易设置
 # ==============================================================================
 FUTURES = {
-    'trade_symbol': 'BTC-USDT-SWAP', # 期货交易对 (永续合约)
+    'trade_symbols': ['BTC-USDT-SWAP', 'ETH-USDT-SWAP'], # 升级为多币种列表
     'leverage': 2,                   # 默认杠杆倍数 (降低风险)
     'margin_mode': 'isolated',       # 保证金模式: 'isolated' (逐仓) or 'cross' (全仓)
     'hedge_mode': False,             # 是否为双向持仓（hedge），False为单向持仓

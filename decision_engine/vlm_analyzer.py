@@ -231,12 +231,13 @@ class VLMAnalyzer:
         
         return analysis_result
 
-    def analyze_kline_chart(self, image_path: str, data_time_range: Optional[str] = None, timeframe: Optional[str] = None, price_data=None) -> Optional[str]:
+    def analyze_kline_chart(self, image_path: str, data_time_range: Optional[str] = None, symbol: str = 'BTC/USDT', timeframe: Optional[str] = None, price_data=None) -> Optional[str]:
         """分析本地的K线图图片，使用72B模型进行更精准的技术分析，支持基于时间范围的智能缓存。
         
         Args:
             image_path: K线图图片路径
             data_time_range: 数据时间范围标识
+            symbol: 交易对，例如 'BTC/USDT'
             timeframe: 时间周期（如'1h', '1d', '1w'等）
             price_data: 价格数据DataFrame，用于提取价格范围信息
         """
@@ -293,7 +294,7 @@ class VLMAnalyzer:
                 LOGGER.warning(f"提取价格范围信息失败: {e}")
         
         prompt_text = f"""
-你是一名精通技术分析的资深量化交易员。请仔细分析这张BTC/USDT的{timeframe_info['name']}K线图。
+你是一名精通技术分析的资深量化交易员。请仔细分析这张 **{symbol}** 的{timeframe_info['name']}K线图。
 你的分析必须只使用简体中文。
 {price_range_info}
 **图表指标说明:**
@@ -330,7 +331,11 @@ class VLMAnalyzer:
 4.  **综合结论与策略**:
     *   **核心结论**: 综合以上所有信息，对{timeframe_info['forecast_period']}的价格走势给出一个明确的 **看涨 (Bullish)**、**看跌 (Bearish)** 或 **中性/震荡 (Neutral/Sideways)** 的判断；若为看跌，请在结论中用条目列出满足的“做空门槛”。
     *   **主要理由**: 简明扼要地列出支持你结论的核心技术信号（例如：MA多头排列，RSI底背离，放量突破上轨）。
-    *   **操作建议**: 基于结论，提出具体的交易策略（例如：若看涨，可在XX价位附近入场，止损设于YY，目标看至ZZ）。
+    *   **操作建议**: 基于你的结论，**必须** 使用以下模板提供明确的操作信号。请务必使用指定的关键词（`信号`、`条件`、`价格`、`理由`），不要有任何偏差。
+        *   **信号**: [做多/做空/观望]
+        *   **条件**: [立即执行 / 价格高于 / 价格低于]
+        *   **价格**: [触发条件的价格，例如 65000 USDT。如果“条件”是“立即执行”，则填“N/A”]
+        *   **理由**: [简明扼要地说明给出此建议的原因]
 
 请以结构化、逻辑清晰的方式提供你的专业分析，并在报告标题中明确标注这是{timeframe_info['name']}技术分析报告。
 """
