@@ -1,4 +1,5 @@
 import json
+import os
 import re
 from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
@@ -8,6 +9,9 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 import config
 from btc_predictor.utils import LOGGER
+
+TRADE_LOG_FILE = 'trade_log.json'
+
 
 class DeepSeekAnalyzer:
     """
@@ -73,12 +77,13 @@ class DeepSeekAnalyzer:
             twitter_data: List[Dict[str, Any]],
             kline_analysis: Dict[str, Optional[str]],
             current_position: Optional[Dict[str, Any]] = None,
-            current_balance: Optional[float] = None
+            current_balance: Optional[float] = None,
+            symbol: str = 'BTC-USDT-SWAP'  # 新增 symbol 参数
     ) -> Dict[str, Any]:
         """
         根据所有输入信息，请求DeepSeek LLM做出最终的交易决策。
         """
-        prompt = self._construct_prompt(quant_signals, twitter_data, kline_analysis, current_position, current_balance)
+        prompt = self._construct_prompt(quant_signals, twitter_data, kline_analysis, current_position, current_balance, symbol)
         return self._make_api_call(prompt)
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
@@ -152,21 +157,62 @@ class DeepSeekAnalyzer:
             
         print("="*80 + "\n")
 
+    def _get_lessons_from_log(self, limit: int = 3) -> str:
+        """从交易日志中读取最近的亏损交易，生成学习教训。"""
+        log_path = os.path.join(os.path.dirname(__file__), '..', TRADE_LOG_FILE)
+        if not os.path.exists(log_path):
+            return ""
+
+        try:
+            with open(log_path, 'r', encoding='utf-8') as f:
+                trade_logs = json.load(f)
+        except (json.JSONDecodeError, IOError):
+            return ""
+
+        losing_trades = [t for t in trade_logs if t.get('pnl', 0) < 0]
+        
+        # 按时间倒序排序，获取最近的亏损
+        losing_trades.sort(key=lambda x: x.get('exit_timestamp_utc', ''), reverse=True)
+        
+        recent_losses = losing_trades[:limit]
+        
+        if not recent_losses:
+            return ""
+
+        lessons_part = "\n# 历史教训 (复盘最近的亏损交易)\n"
+        lessons_part += "--- \n"
+        lessons_part += "在做本次决策前，请务必回顾并吸取以下最近几次失败交易的教训，避免重蹈覆辙。\n"
+
+        for i, trade in enumerate(recent_losses):
+            entry_report = trade.get('entry_report', {})
+            lessons_part += f"\n### 复盘案例 {i+1}: 一笔 {trade.get('symbol')} 的亏损交易\n"
+            lessons_part += f"- **方向**: {entry_report.get('decision', 'N/A')}\n"
+            lessons_part += f"- **最终盈亏**: **{trade.get('pnl', 0):.2f} USDT**\n"
+            lessons_part += f"- **当时的决策理由**: \"{entry_report.get('reasoning', '无记录')}\"\n"
+            lessons_part += f"- **当时的关键信号**: \"{entry_report.get('key_signals_detected', '无记录')}\"\n"
+
+        lessons_part += "\n---\n"
+        return lessons_part
+
     def _construct_prompt(
         self, 
         quant_signals: List[Dict[str, Any]], 
         twitter_data: List[Dict[str, Any]],
         kline_analysis: Dict[str, Optional[str]],
         current_position: Optional[Dict[str, Any]] = None,
-        current_balance: Optional[float] = None
+        current_balance: Optional[float] = None,
+        symbol: str = 'BTC-USDT-SWAP' # 新增 symbol 参数
     ) -> str:
         """
         构建一个更精细化的提示词，区分不同来源的推文并强调时效性。
         """
+        # --- [学习闭环] 新增：获取历史教训 ---
+        lessons_part = self._get_lessons_from_log()
+
         signal_part = self._format_quant_signals(quant_signals) # 修改调用
         twitter_part = self._format_twitter_data(twitter_data)
         kline_part = self._format_kline_analysis(kline_analysis)
-        position_part = self._format_position_info(current_position)
+        position_part = self._format_position_info(current_position, symbol) # 传递symbol
         # 持仓记忆：尝试读取 last_run.json，补充持仓上下文
         import os
         last_decision_info = ''
@@ -189,12 +235,15 @@ class DeepSeekAnalyzer:
         if quant_signals and isinstance(quant_signals, list) and quant_signals[0].get('current_price'):
             current_price = quant_signals[0].get('current_price')
 
-        market_context_part = f"当前BTC/USDT市场价格: **${current_price:.2f}**" if current_price else "无法获取当前市场价格。"
+        # 使用传入的 symbol 格式化交易对名称
+        asset_name = symbol.split('-')[0]
+        market_context_part = f"当前 {asset_name}/USDT 市场价格: **${current_price:.2f}**" if current_price else "无法获取当前市场价格。"
 
         system_prompt = f"""
 # 角色
-你是一名顶级的加密货币**期货**短线交易策略师，专注于小时级别（1H）K线的短线快进快出操作。你必须在大量信息中精准识别关键信号，尤其关注能在1-6小时内带来收益的短线机会。
+你是一名顶级的加密货币**期货**短线交易策略师，专注于小时级别（1H）K线的短线快进快出操作。你必须在大量信息中精准识别关键信号，尤其关注能在1-6小时内带来收益的短线机会。你正在为 **{asset_name}** 这个币种做决策。
 
+{lessons_part}
 # 核心原则
 1.  **顺势与机会捕捉 (最高优先级)**:
     *   **默认中性**: 在证据不足或信号冲突时，首选 `HOLD`，避免勉强进场。
@@ -209,8 +258,8 @@ class DeepSeekAnalyzer:
     *   **短线盈利优先**: 只要VLM技术分析显示明确的短线盈利机会（1H K线），就优先考虑短线盈利机会，忽略长期金融市场趋势。
 
 2.  **风险管理与资金保护**:
-    *   **资金优先 (硬性要求)**: 你的首要任务是确保能成功下单。如果决策是开仓（LONG/SHORT），你必须根据当前余额和市场价格计算能够满足交易所 **0.01 BTC** 最小开仓量的最低杠杆。
-      *   **计算公式**: `所需杠杆 = (0.01 * 当前市场价格) / (当前账户余额 * 0.95)`
+    *   **资金优先 (硬性要求)**: 你的首要任务是确保能成功下单。如果决策是开仓（LONG/SHORT），你必须根据当前余额和市场价格计算能够满足交易所 **最小开仓量** 的最低杠杆。
+      *   **计算公式**: `所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)` (例如BTC最小开仓量为0.01, ETH为0.1)
       *   **决策逻辑**:
         *   计算出`所需杠杆`后，向上取整（例如，2.1倍计算为3倍）。
         *   如果`所需杠杆` > 5 (最大允许杠杆)，则最终决策必须是 `HOLD`，并在 `reasoning` 中明确指出“因资金不足，即使5倍杠杆也无法满足最小开仓量，故放弃交易”。
@@ -236,10 +285,11 @@ class DeepSeekAnalyzer:
 
 # 信息解读
 - **内部量化模型矩阵**: 你会收到一个包含多个策略信号的列表。每个信号都有独立的来源和逻辑。
-  - **信号一致性**: 如果多个策略（如RF4背离和布林带突破）发出相同方向的信号（都是BUY或都是SELL），这是一个强烈的共振信号，应显著提高决策置信度。
+  - **信号一致性**: 如果多个策略（如RF4背离和MA交叉）发出相同方向的信号（都是BUY或都是SELL），这是一个强烈的共振信号，应显著提高决策置信度。
   - **信号冲突**: 如果策略信号相互矛盾（一个BUY，一个SELL），这表明市场方向不明朗，风险较高。在这种情况下，应优先考虑 `HOLD`，或至少降低仓位和杠杆，并更加依赖VLM对当前K线形态的直接解读来打破僵局。
   - **单一信号**: 如果只有一个策略发出明确信号，应将其视为重要参考，但不是决定性因素，需要与其他信息源（VLM K线分析、新闻）进行交叉验证。
 - **VLM K线分析**: 这是短线决策的核心依据。`1H K线分析` 权重最高。
+  - **结构化指令**: VLM的`1H K线分析`会提供一个结构化的`操作建议`，包含`信号`、`条件`和`价格`。**你必须严格遵循这个指令**。例如，如果信号是`做空`，条件是`价格低于`，价格是`65000 USDT`，那么只有当**当前市场价格**低于65000 USDT时，你的决策才能是`SHORT`。如果条件不满足，即使VLM看跌，你的决策也应该是`HOLD`，并在`reasoning`中说明你在等待条件触发。
 - **新闻情报**: 重点关注能引发市场情绪剧烈波动的突发新闻。
 
 # 当前市场状态与持仓记忆
@@ -283,9 +333,12 @@ class DeepSeekAnalyzer:
 
         quant_part = "### 内部量化模型矩阵\n"
         for signal_data in quant_signals:
-            strategy = signal_data.get('strategy', '未知策略')
+            # 确保即使没有strategy字段也不会报错
+            strategy = signal_data.get('strategy', '未知策略') 
             signal_type = signal_data.get('signal', 'HOLD')
-            info = signal_data.get('info', '无详细信息。')
+            
+            # 优先使用 action 字段，如果不存在则使用 info
+            info = signal_data.get('action') or signal_data.get('info', '无详细信息。')
             current_price = signal_data.get('current_price')
 
             quant_part += f"\n#### 策略: {strategy}\n"
@@ -332,7 +385,7 @@ class DeepSeekAnalyzer:
             
         return kline_part + "\n".join(valid_analyses)
 
-    def _format_position_info(self, position_data: Optional[Dict[str, Any]]) -> str:
+    def _format_position_info(self, position_data: Optional[Dict[str, Any]], symbol: str) -> str:
         """格式化当前持仓信息。"""
         position_part = "## 1. 当前持仓状态\n\n"
         if not position_data or not position_data.get('posSide'):
@@ -344,6 +397,9 @@ class DeepSeekAnalyzer:
         avg_price = position_data.get('avgPx')
         unrealized_pnl = position_data.get('upl')
         leverage = position_data.get('lever')
+
+        # 从 symbol 中提取资产名称 (e.g., 'BTC' from 'BTC-USDT-SWAP')
+        asset_name = symbol.split('-')[0] if symbol else '资产'
 
         # 新增net模式判断
         if side == 'net':
@@ -363,7 +419,7 @@ class DeepSeekAnalyzer:
         elif side == 'short':
             position_part += f"- **持仓方向**: **做空 (SHORT)**\n"
 
-        position_part += f"- **持仓数量**: {qty} BTC\n"
+        position_part += f"- **持仓数量**: {qty} {asset_name}\n"
         position_part += f"- **开仓均价**: ${avg_price}\n"
         position_part += f"- **杠杆倍数**: {leverage}x\n"
         position_part += f"- **未实现盈亏**: **${unrealized_pnl}**\n"
@@ -430,14 +486,16 @@ if __name__ == '__main__':
     # 模拟测试数据
     test_quant_signals = [
         {
-            "strategy": "RF4背离",
+            "strategy": "RF4_Divergence",
             "signal": "BUY",
+            "action": "看涨背离",
             "info": "测试RF4背离信号",
             "current_price": 30000.0
         },
         {
-            "strategy": "布林带突破",
+            "strategy": "Bollinger_Breakout",
             "signal": "SELL",
+            "action": "跌破布林带下轨",
             "info": "测试布林带突破信号",
             "current_price": 30500.0
         }
@@ -466,7 +524,8 @@ if __name__ == '__main__':
             twitter_data=test_twitter_data,
             kline_analysis=test_kline_analysis,
             current_position=None,
-            current_balance=500.0
+            current_balance=500.0,
+            symbol='BTC-USDT-SWAP' # 添加测试symbol
         )
         print("\n" + "="*25 + " 测试结果 " + "="*25)
         print(f"决策结果: {result}")

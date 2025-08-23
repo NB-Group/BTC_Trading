@@ -72,7 +72,7 @@ def _create_kline_screenshot(html_path: str, image_path: str) -> None:
         finally:
             browser.close()
 
-def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tuple[str, str]]:
+def create_kline_image(df: pd.DataFrame, save_dir: str = "cache", timeframe: str = "1h") -> Optional[Tuple[str, str]]:
     """
     使用Pyecharts和Playwright创建专业风格的K线图。
     """
@@ -81,52 +81,43 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
             LOGGER.warning(f"数据不足 (需要至少2条，实际获取到 {len(df) if df is not None else 0} 条数据)，无法生成K线图。")
             return None
         os.makedirs(save_dir, exist_ok=True)
+        
+        # --- [修复] 从DataFrame的attrs中获取symbol ---
+        symbol = df.attrs.get('symbol', 'UNKNOWN')
 
         # --- 步骤 1: 数据准备和指标计算 ---
         # 确保索引是 DatetimeIndex
         if not isinstance(df.index, pd.DatetimeIndex):
             df.index = pd.to_datetime(df.index)
-        
-        # 创建一个完整的时间序列，以连接断点
-        full_range = pd.date_range(start=df.index.min(), end=df.index.max(), freq='H')
-        df_reindexed = df.reindex(full_range)
-        
-        # 使用前向填充来填充数据，但保留K线形状
-        df_filled = df_reindexed.copy()
-        
-        # 填充 OHLC 数据：用收盘价填充，然后前向填充
-        df_filled['close'] = df_filled['close'].ffill()
-        df_filled['open'] = df_filled['open'].fillna(df_filled['close'])
-        df_filled['high'] = df_filled['high'].fillna(df_filled['close'])
-        df_filled['low'] = df_filled['low'].fillna(df_filled['close'])
-        df_filled['volume'] = df_filled['volume'].fillna(0)
-        
+
+        # --- [修复] 移除错误的数据填充逻辑 ---
+        # 对于非连续数据（如日线/周线），不应进行小时级填充
+        df_plot = df.copy()
+
         # 计算技术指标
-        ma5 = df_filled['close'].rolling(window=5, min_periods=1).mean().round(2)
-        ma10 = df_filled['close'].rolling(window=10, min_periods=1).mean().round(2)
-        ma20 = df_filled['close'].rolling(window=20, min_periods=1).mean().round(2)
-        ma60 = df_filled['close'].rolling(window=60, min_periods=1).mean().round(2)
+        ma5 = df_plot['close'].rolling(window=5, min_periods=1).mean().round(2)
+        ma10 = df_plot['close'].rolling(window=10, min_periods=1).mean().round(2)
+        ma20 = df_plot['close'].rolling(window=20, min_periods=1).mean().round(2)
+        ma60 = df_plot['close'].rolling(window=60, min_periods=1).mean().round(2)
         
-        std_dev = df_filled['close'].rolling(window=20, min_periods=1).std()
+        std_dev = df_plot['close'].rolling(window=20, min_periods=1).std()
         boll_upper = (ma20 + 2 * std_dev).round(2)
         boll_lower = (ma20 - 2 * std_dev).round(2)
         
-        delta = df_filled['close'].diff()
+        delta = df_plot['close'].diff()
         gain = delta.where(delta > 0, 0)
         loss = -delta.where(delta < 0, 0)
         avg_gain = gain.rolling(window=14, min_periods=1).mean()
         avg_loss = loss.rolling(window=14, min_periods=1).mean()
-        # 使用 np.where 避免直接在 Series 上 .replace
-        safe_avg_loss = pd.Series(np.where(avg_loss == 0, 1e-9, avg_loss), index=df_filled.index)
+        safe_avg_loss = pd.Series(np.where(avg_loss == 0, 1e-9, avg_loss), index=df_plot.index)
         rs = avg_gain / safe_avg_loss
-        rsi_series = pd.Series(100 - (100 / (1 + rs)), index=df_filled.index)
+        rsi_series = pd.Series(100 - (100 / (1 + rs)), index=df_plot.index)
         rsi = rsi_series.fillna(50).round(2)
 
         # 准备Pyecharts所需的数据格式
-        ohlc_data = df_filled[['open', 'close', 'low', 'high']].values.tolist()
-        # 使用列表推导式来确保 strftime 在每个 Timestamp 上调用
-        dates = [d.strftime('%Y-%m-%d %H:%M:%S') for d in df_filled.index]
-        volumes = df_filled['volume'].values.tolist()
+        ohlc_data = df_plot[['open', 'close', 'low', 'high']].values.tolist()
+        dates = [d.strftime('%Y-%m-%d %H:%M:%S') for d in df_plot.index]
+        volumes = df_plot['volume'].values.tolist()
 
         # --- 步骤 2: 使用Pyecharts创建图表 ---
         # K线主图
@@ -155,7 +146,7 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
                     opts.DataZoomOpts(is_show=False, type_="inside", xaxis_index=[0, 1, 2], range_start=50, range_end=100),
                     opts.DataZoomOpts(is_show=True, type_="slider", xaxis_index=[0, 1, 2], pos_bottom="0%", range_start=50, range_end=100),
                 ],
-                title_opts=opts.TitleOpts(title="BTC/USDT 1H Chart", pos_left="center"),
+                title_opts=opts.TitleOpts(title=f"{symbol} {timeframe.upper()} Chart", pos_left="center"),
                 legend_opts=opts.LegendOpts(pos_top="3%"),
             )
         )
@@ -236,9 +227,11 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
         else:
             data_time_range = f"generic_data_{len(df)}bars"
         
-        image_filename = f"kline_chart_{data_time_range}.png"
+        # 在文件名中加入symbol防止冲突
+        symbol_filename = symbol.replace('/', '_')
+        image_filename = f"kline_chart_{symbol_filename}_{data_time_range}.png"
         image_path = os.path.join(save_dir, image_filename)
-        html_filename = f"temp_kline_{data_time_range}.html"
+        html_filename = f"temp_kline_{symbol_filename}_{data_time_range}.html"
         html_path = os.path.join(save_dir, html_filename)
 
         # ECharts 渲染的HTML
@@ -259,18 +252,27 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache") -> Optional[Tu
 if __name__ == '__main__':
     from btc_predictor.data import get_data
     from btc_predictor.config import DATA_CONFIG
-    print("--- 运行 Pyecharts K-line Plotter 独立测试 ---")
-    symbol = cast(str, DATA_CONFIG['symbol'])
-    timeframe = cast(str, DATA_CONFIG['timeframe'])
-    test_data = get_data(symbol=symbol, timeframe=timeframe, limit=200)
-    if test_data is not None:
-        result = create_kline_image(test_data, save_dir="temp_test_cache")
-        if result:
-            image_path, data_time_range = result
-            print(f"\n测试成功！K线图已保存到: {image_path}")
-            print(f"数据时间范围: {data_time_range}")
-            print("请检查项目根目录下的 temp_test_cache 文件夹。")
+    print("--- 运行 Pyecharts K-line Plotter 独立测试 (1H, 1D, 1W) ---")
+    
+    symbol_to_test = cast(str, DATA_CONFIG['symbol'])
+    timeframes_to_test = ['1h', '1d', '1w']
+    
+    for timeframe_to_test in timeframes_to_test:
+        print(f"\n--- 正在生成 {timeframe_to_test.upper()} K线图 ---")
+        limit = 200 if timeframe_to_test == '1h' else 150 # 日线和周线不需要太多数据
+        
+        test_data = get_data(symbol=symbol_to_test, timeframe=timeframe_to_test, limit=limit)
+        
+        if test_data is not None and not test_data.empty:
+            # 在测试中手动设置attrs，模拟真实流程
+            test_data.attrs['symbol'] = symbol_to_test
+            result = create_kline_image(test_data, save_dir="temp_test_cache", timeframe=timeframe_to_test)
+            if result:
+                image_path, data_time_range = result
+                print(f"✅ [{timeframe_to_test.upper()}] 测试成功！K线图已保存到: {image_path}")
+            else:
+                print(f"❌ [{timeframe_to_test.upper()}] 测试失败，无法生成K线图。请检查日志获取详细信息。")
         else:
-            print("\n测试失败，无法生成K线图。请检查日志获取详细信息。")
-    else:
-        print("\n获取数据失败，无法测试K线图生成。") 
+            print(f"❌ [{timeframe_to_test.upper()}] 获取数据失败，无法测试K线图生成。")
+
+    print("\n所有测试完成。请检查项目根目录下的 temp_test_cache 文件夹。") 

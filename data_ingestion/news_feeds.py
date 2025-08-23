@@ -14,22 +14,28 @@ except ImportError:
     PLAYWRIGHT_AVAILABLE = False
     LOGGER.warning("Playwright未安装，将使用备用方法获取新闻")
 
-async def fetch_coindesk_news_with_playwright(limit: int = 15) -> List[Dict[str, Any]]:
+async def fetch_coindesk_news_with_playwright(symbol: str, limit: int = 15) -> List[Dict[str, Any]]:
     """
     使用Playwright从CoinDesk的RSS源获取最新的加密货币新闻。
-
-    Args:
-        limit (int): 要返回的最大新闻条目数。
-
-    Returns:
-        List[Dict[str, Any]]: 新闻条目列表，每条新闻是一个字典。
+    现在支持根据symbol获取特定币种的新闻。
     """
     if not PLAYWRIGHT_AVAILABLE:
         LOGGER.error("Playwright不可用，无法获取新闻")
         return []
+
+    # 根据symbol构建RSS URL
+    asset = symbol.split('-')[0].lower() # e.g., 'btc' from 'BTC-USDT-SWAP'
     
-    coindesk_rss_url = "https://www.coindesk.com/arc/outboundfeeds/rss/"
-    LOGGER.info(f"正在使用Playwright从CoinDesk RSS源获取新闻: {coindesk_rss_url}")
+    # 基础URL和特定币种URL的映射
+    url_map = {
+        'btc': "https://www.coindesk.com/arc/outboundfeeds/rss/?outputType=xml",
+        'eth': "https://www.coindesk.com/arc/outboundfeeds/rss/category/markets/ethereum/?outputType=xml",
+        'sol': "https://www.coindesk.com/arc/outboundfeeds/rss/category/web3/solana/?outputType=xml",
+    }
+    # 默认使用BTC的URL
+    coindesk_rss_url = url_map.get(asset, url_map['btc'])
+    
+    LOGGER.info(f"正在使用Playwright从CoinDesk RSS源 ({symbol}) 获取新闻: {coindesk_rss_url}")
 
     try:
         async with async_playwright() as p:
@@ -147,12 +153,13 @@ async def fetch_coindesk_news_with_playwright(limit: int = 15) -> List[Dict[str,
         LOGGER.error(f"使用Playwright获取CoinDesk新闻时发生错误: {e}")
         return []
 
-def fetch_coindesk_news(limit: int = 15) -> List[Dict[str, Any]]:
+def fetch_coindesk_news(symbol: str = 'BTC-USDT-SWAP', limit: int = 15) -> List[Dict[str, Any]]:
     """
     从CoinDesk的RSS源获取最新的加密货币新闻。
     使用Playwright作为主要方法，如果失败则返回空列表。
 
     Args:
+        symbol (str): 交易对，例如 'BTC-USDT-SWAP'
         limit (int): 要返回的最大新闻条目数。
 
     Returns:
@@ -163,7 +170,7 @@ def fetch_coindesk_news(limit: int = 15) -> List[Dict[str, Any]]:
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
         try:
-            result = loop.run_until_complete(fetch_coindesk_news_with_playwright(limit))
+            result = loop.run_until_complete(fetch_coindesk_news_with_playwright(symbol, limit))
         finally:
             loop.close()
         return result

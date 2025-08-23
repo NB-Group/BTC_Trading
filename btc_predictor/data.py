@@ -127,9 +127,13 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: in
                 return pd.DataFrame()
             
             df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+            # --- [修复] 修正时区问题 ---
+            df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms', utc=True)
             df.set_index('timestamp', inplace=True)
             LOGGER.success(f"成功获取了 {len(df)} 条最新数据。")
+            
+            # --- [修复] 注入币种信息 ---
+            df.attrs['symbol'] = symbol
             return df
 
         except Exception as e:
@@ -210,7 +214,8 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: in
         new_df = pd.DataFrame(all_ohlcv)
         if new_df.shape[1] == 6:
             new_df.columns = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-        new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms')
+        # --- [修复] 修正时区问题 ---
+        new_df['timestamp'] = pd.to_datetime(new_df['timestamp'], unit='ms', utc=True)
         new_df.set_index('timestamp', inplace=True)
         if not isinstance(df, pd.DataFrame):
             df = pd.DataFrame(df)
@@ -236,6 +241,9 @@ def get_data(symbol: str, timeframe: str, since: Optional[str] = None, limit: in
         return pd.DataFrame()
     if not isinstance(df, pd.DataFrame):
         df = pd.DataFrame(df)
+        
+    # --- [修复] 注入币种信息 ---
+    df.attrs['symbol'] = symbol
     return df.copy()
 
 def get_prepared_data_for_training(model_name: str) -> tuple[pd.DataFrame, pd.Series]:

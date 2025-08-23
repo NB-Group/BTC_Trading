@@ -94,7 +94,7 @@ def get_all_predictions(model_name: str, price_data: pd.DataFrame) -> Optional[p
         LOGGER.error(f"批量生成预测时发生严重错误: {e}")
         return None
 
-def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
+def get_live_trade_signal(model_name: str, symbol: str) -> Optional[Dict[str, Any]]:
     """
     获取最新的实时交易信号。
     这是主循环调用的核心函数，用于实盘交易决策。
@@ -102,7 +102,7 @@ def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
     from .data import get_data # 局部导入
     from .config import DATA_CONFIG # 导入数据配置
     
-    LOGGER.info(f"正在为模型 '{model_name}' 获取实时交易信号...")
+    LOGGER.info(f"正在为模型 '{model_name}' 获取 {symbol} 的实时交易信号...")
     
     try:
         # 1. 加载模型
@@ -115,12 +115,12 @@ def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
 
         # 2. 获取最新数据 (获取稍多一些数据以计算指标)
         price_data = get_data(
-            symbol=DATA_CONFIG['symbol'], 
+            symbol=symbol, 
             timeframe=DATA_CONFIG['timeframe'], 
             limit=ma_window + 150 # 增加获取量以确保有足够数据
         )
         if price_data is None or len(price_data) < ma_window:
-            LOGGER.warning("获取的数据不足以计算指标，无法生成信号。")
+            LOGGER.warning(f"[{symbol}] 获取的数据不足以计算指标，无法生成信号。")
             return None
 
         # 3. 计算特征和信号
@@ -161,6 +161,7 @@ def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
             "predicted_return": prediction,
             "timestamp": latest.name.isoformat(),
             "current_price": latest['close'],
+            "strategy": f"ML_MA{ma_window}_Crossover", # 增加策略标识
             "info": "信号处理成功。" # 明确的成功信息
         }
         LOGGER.info(f"实时信号获取成功: {result}")
@@ -172,6 +173,7 @@ def get_live_trade_signal(model_name: str) -> Optional[Dict[str, Any]]:
             "signal": "HOLD",
             "predicted_return": 0.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "strategy": "ML_MA_Crossover", # 增加策略标识
             "info": f"获取信号时出错: {e}"
         }
 
@@ -353,11 +355,12 @@ def run_rf4_backtest(ohlcv_df: pd.DataFrame, period: int = 14, order: int = 5,
     
     return results
 
-def get_rf4_signal(period: int = 14, order: int = 5) -> Optional[Dict[str, Any]]:
+def get_rf4_signal(symbol: str, period: int = 14, order: int = 5) -> Optional[Dict[str, Any]]:
     """
     获取RF4背离策略的实时交易信号
     
     Args:
+        symbol: 交易对 (例如 'BTC/USDT')
         period: RSI周期
         order: 背离检测的波峰/波谷查找范围
     
@@ -368,19 +371,19 @@ def get_rf4_signal(period: int = 14, order: int = 5) -> Optional[Dict[str, Any]]
     from .config import DATA_CONFIG
     from .rf4_features import generate_rf4_signals
     
-    LOGGER.info(f"正在获取RF4背离策略信号 (period={period}, order={order})...")
+    LOGGER.info(f"[{symbol}] 正在获取RF4背离策略信号 (period={period}, order={order})...")
     
     try:
         # 获取足够的历史数据以计算背离
         lookback_periods = max(order * 10, 100)  # 确保有足够数据检测背离
         price_data = get_data(
-            symbol=DATA_CONFIG['symbol'],
+            symbol=symbol,
             timeframe=DATA_CONFIG['timeframe'],
             limit=lookback_periods
         )
         
         if price_data is None or len(price_data) < lookback_periods:
-            LOGGER.warning("获取的数据不足以计算RF4指标，无法生成信号。")
+            LOGGER.warning(f"[{symbol}] 获取的数据不足以计算RF4指标，无法生成信号。")
             return None
         
         # 生成RF4信号
@@ -388,14 +391,8 @@ def get_rf4_signal(period: int = 14, order: int = 5) -> Optional[Dict[str, Any]]
         
         # 安全获取最新信号
         if signals_df.empty or len(signals_df) == 0:
-            LOGGER.warning("信号生成失败，返回持有信号")
-            return {
-                "signal": "HOLD",
-                "action": "持有",
-                "current_price": float(price_data['close'].iloc[-1]) if not price_data.empty else 0.0,
-                "timestamp": price_data.index[-1].isoformat() if not price_data.empty else datetime.now(timezone.utc).isoformat(),
-                "error": "信号生成失败"
-            }
+            LOGGER.warning(f"[{symbol}] RF4信号计算模块未能生成任何信号数据，返回None。")
+            return None
         
         latest_signal = signals_df['signal'].iloc[-1]
         current_price = price_data['close'].iloc[-1]
@@ -420,21 +417,23 @@ def get_rf4_signal(period: int = 14, order: int = 5) -> Optional[Dict[str, Any]]
             "action": action,
             "current_price": float(current_price),
             "timestamp": price_data.index[-1].isoformat(),
+            "strategy": "RF4_Divergence", # 增加策略标识
             "rf4_value": float(signals_df['rf4'].iloc[-1]) if 'rf4' in signals_df.columns else None,
             "bullish_divergence": bool(signals_df['bullish_divergence'].iloc[-1]) if 'bullish_divergence' in signals_df.columns else False,
             "bearish_divergence": bool(signals_df['bearish_divergence'].iloc[-1]) if 'bearish_divergence' in signals_df.columns else False
         }
         
-        LOGGER.info(f"RF4信号获取成功: {result['signal']} - {result['action']}")
+        LOGGER.info(f"[{symbol}] RF4信号获取成功: {result['signal']} - {result['action']}")
         return result
         
     except Exception as e:
-        LOGGER.error(f"获取RF4信号时发生错误: {e}")
+        LOGGER.error(f"[{symbol}] 获取RF4信号时发生错误: {e}")
         return {
             "signal": "HOLD",
             "action": "持有",
             "current_price": 0.0,
             "timestamp": datetime.now(timezone.utc).isoformat(),
+            "strategy": "RF4_Divergence", # 增加策略标识
             "error": f"获取RF4信号时出错: {e}"
         }
 
@@ -536,11 +535,12 @@ def optimize_rf4_parameters(days: int = 365, n_trials: int = 50) -> Dict[str, An
         return {"error": f"优化过程出错: {str(e)}"}
 
 
-def get_bollinger_breakout_signal(window: int = 20, std_dev: float = 2.0) -> Optional[Dict[str, Any]]:
+def get_bollinger_breakout_signal(symbol: str, window: int = 20, std_dev: float = 2.0) -> Optional[Dict[str, Any]]:
     """
     获取布林带突破策略的实时交易信号。
 
     Args:
+        symbol (str): 交易对 (例如 'BTC/USDT')。
         window (int): 布林带的时间窗口。
         std_dev (float): 布林带的标准差倍数。
 
@@ -551,18 +551,18 @@ def get_bollinger_breakout_signal(window: int = 20, std_dev: float = 2.0) -> Opt
     from .config import DATA_CONFIG
     from ta.volatility import BollingerBands
 
-    LOGGER.info(f"正在获取布林带突破策略信号 (window={window}, std_dev={std_dev})...")
+    LOGGER.info(f"[{symbol}] 正在获取布林带突破策略信号 (window={window}, std_dev={std_dev})...")
 
     try:
         # 获取足够的数据来计算布林带
         price_data = get_data(
-            symbol=DATA_CONFIG['symbol'],
+            symbol=symbol,
             timeframe=DATA_CONFIG['timeframe'],
             limit=window * 2  # 获取窗口两倍的数据量以确保准确性
         )
 
         if price_data is None or len(price_data) < window:
-            LOGGER.warning("获取的数据不足以计算布林带，无法生成信号。")
+            LOGGER.warning(f"[{symbol}] 获取的数据不足以计算布林带，无法生成信号。")
             return None
 
         # 计算布林带
@@ -596,11 +596,11 @@ def get_bollinger_breakout_signal(window: int = 20, std_dev: float = 2.0) -> Opt
             "params": f"window={window}, std_dev={std_dev}"
         }
 
-        LOGGER.info(f"布林带突破信号获取成功: {signal} - {action}")
+        LOGGER.info(f"[{symbol}] 布林带突破信号获取成功: {signal} - {action}")
         return result
 
     except Exception as e:
-        LOGGER.error(f"获取布林带突破信号时发生错误: {e}")
+        LOGGER.error(f"[{symbol}] 获取布林带突破信号时发生错误: {e}")
         return {
             "signal": "HOLD",
             "action": "持有",
@@ -608,4 +608,77 @@ def get_bollinger_breakout_signal(window: int = 20, std_dev: float = 2.0) -> Opt
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "error": f"获取布林带信号时出错: {e}",
             "strategy": "Bollinger_Breakout"
+        }
+
+def get_ma_crossover_signal(symbol: str, fast_period: int = 5, slow_period: int = 20) -> Optional[Dict[str, Any]]:
+    """
+    获取移动平均线（MA）交叉策略的实时交易信号。
+
+    Args:
+        symbol (str): 交易对 (例如 'BTC/USDT')。
+        fast_period (int): 快速移动平均线的周期。
+        slow_period (int): 慢速移动平均线的周期。
+
+    Returns:
+        Dict: 包含信号、当前价格、时间戳等信息的字典。
+    """
+    from .data import get_data
+    from .config import DATA_CONFIG
+
+    LOGGER.info(f"[{symbol}] 正在获取MA交叉策略信号 (fast={fast_period}, slow={slow_period})...")
+
+    try:
+        # 获取足够的数据来计算移动平均线
+        price_data = get_data(
+            symbol=symbol,
+            timeframe=DATA_CONFIG['timeframe'],
+            limit=slow_period + 5  # 获取足够计算最长MA的数据
+        )
+
+        if price_data is None or len(price_data) < slow_period:
+            LOGGER.warning(f"[{symbol}] 获取的数据不足以计算MA交叉，无法生成信号。")
+            return None
+
+        # 计算移动平均线
+        df = price_data.copy()
+        df['fast_ma'] = df['close'].rolling(window=fast_period).mean()
+        df['slow_ma'] = df['close'].rolling(window=slow_period).mean()
+
+        # 获取最新的两个数据点以判断交叉
+        latest = df.iloc[-1]
+        previous = df.iloc[-2]
+
+        signal = "HOLD"
+        action = "持有"
+
+        # 金叉: 短期均线从下方上穿长期均线
+        if previous['fast_ma'] < previous['slow_ma'] and latest['fast_ma'] > latest['slow_ma']:
+            signal = "BUY"
+            action = f"做多 (MA{fast_period} 金叉 MA{slow_period})"
+        # 死叉: 短期均线从上方下穿长期均线
+        elif previous['fast_ma'] > previous['slow_ma'] and latest['fast_ma'] < latest['slow_ma']:
+            signal = "SELL"
+            action = f"做空 (MA{fast_period} 死叉 MA{slow_period})"
+
+        result = {
+            "signal": signal,
+            "action": action,
+            "current_price": float(latest['close']),
+            "timestamp": latest.name.isoformat(),
+            "strategy": "MA_Crossover",
+            "params": f"fast={fast_period}, slow={slow_period}"
+        }
+
+        LOGGER.info(f"[{symbol}] MA交叉信号获取成功: {signal} - {action}")
+        return result
+
+    except Exception as e:
+        LOGGER.error(f"[{symbol}] 获取MA交叉信号时发生错误: {e}")
+        return {
+            "signal": "HOLD",
+            "action": "持有",
+            "current_price": 0.0,
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "error": f"获取MA交叉信号时出错: {e}",
+            "strategy": "MA_Crossover"
         }
