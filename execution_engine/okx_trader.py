@@ -358,6 +358,13 @@ class OKXTrader:
                             "pnl": pnl
                         }
                         
+                        # [学习闭环增强] 新增：行情复盘分析
+                        if pnl < 0:
+                            if decision == 'CLOSE_LONG':
+                                trade_log_entry['outcome_analysis'] = "行情复盘：入场后，价格并未按预期上涨，而是继续下跌，证明了当时的看涨信号是一个‘多头陷阱’。"
+                            elif decision == 'CLOSE_SHORT':
+                                trade_log_entry['outcome_analysis'] = "行情复盘：入场后，价格并未按预期下跌，而是继续上涨，证明了当时的看跌信号是一个‘空头陷阱’。"
+
                         trade_logs = self._load_json_db(TRADE_LOG_FILE, [])
                         trade_logs.append(trade_log_entry)
                         self._save_json_db(TRADE_LOG_FILE, trade_logs)
