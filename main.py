@@ -185,8 +185,8 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             short_term_data = get_data(symbol=ccxt_symbol, timeframe='1h', limit=limit_5_days_hourly)
             # 获取日线数据
             daily_data = get_data(symbol=ccxt_symbol, timeframe='1d', limit=200)
-            # 获取周线数据
-            weekly_data = get_data(symbol=ccxt_symbol, timeframe='1w', limit=100)
+            # 获取15分钟数据 (替换周线)
+            fine_grained_data = get_data(symbol=ccxt_symbol, timeframe='15m', limit=300) # 获取约3天的15分钟数据
 
             price_data_for_ma = short_term_data.tail(limit_5_days_hourly) if short_term_data is not None and not short_term_data.empty else None
 
@@ -268,9 +268,9 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                 }
                 quant_signals.append(default_signal)
 
-            return short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signals
+            return short_term_data, daily_data, fine_grained_data, price_data_for_ma, quant_signals
         
-        short_term_data, daily_data, weekly_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
+        short_term_data, daily_data, fine_grained_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
 
         # --- 智能分析门禁 (Smart Analysis Gate) ---
         # [重要修正] 此门禁仅对非主攻币种生效
@@ -321,9 +321,9 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             def perform_vlm_analysis():
                 short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
                 daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data, "Daily", "1d")
-                weekly_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, weekly_data, "Weekly", "1w")
-                return short_term_analysis, daily_analysis, weekly_analysis
-            short_term_analysis, daily_analysis, weekly_analysis = track_process('vlm_analysis', perform_vlm_analysis)
+                fine_grained_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, fine_grained_data, "15-Min", "15m")
+                return short_term_analysis, daily_analysis, fine_grained_analysis
+            short_term_analysis, daily_analysis, fine_grained_analysis = track_process('vlm_analysis', perform_vlm_analysis)
         finally:
             restore_proxy_env(_orig_proxy_env)
 
@@ -367,7 +367,7 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     kline_analysis={
                         "short_term": short_term_analysis,
                         "daily": daily_analysis,
-                        "weekly": weekly_analysis
+                        "15_min": fine_grained_analysis
                     },
                     current_position=current_position,
                     current_balance=current_balance,
