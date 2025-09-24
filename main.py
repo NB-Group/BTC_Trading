@@ -180,13 +180,9 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             # OKX symbol format for ccxt: 'BTC/USDT'
             ccxt_symbol = current_symbol.replace('-SWAP', '').replace('-', '/')
 
-            # 获取主要时间框架数据 (例如 1h)，增加到5天的数据量
-            limit_5_days_hourly = 5 * 24 
+            # 获取主要时间框架数据 (1h) 约5天
+            limit_5_days_hourly = 5 * 24
             short_term_data = get_data(symbol=ccxt_symbol, timeframe='1h', limit=limit_5_days_hourly)
-            # 获取日线数据
-            daily_data = get_data(symbol=ccxt_symbol, timeframe='1d', limit=200)
-            # 获取15分钟数据 (替换周线)
-            fine_grained_data = get_data(symbol=ccxt_symbol, timeframe='15m', limit=300) # 获取约3天的15分钟数据
 
             price_data_for_ma = short_term_data.tail(limit_5_days_hourly) if short_term_data is not None and not short_term_data.empty else None
 
@@ -268,9 +264,8 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                 }
                 quant_signals.append(default_signal)
 
-            return short_term_data, daily_data, fine_grained_data, price_data_for_ma, quant_signals
-        
-        short_term_data, daily_data, fine_grained_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
+            return short_term_data, price_data_for_ma, quant_signals
+        short_term_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
 
         # --- 智能分析门禁 (Smart Analysis Gate) ---
         # [重要修正] 此门禁仅对非主攻币种生效
@@ -297,8 +292,8 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         # ======================================================================
         # 步骤 3: 生成并分析多时间框架的K线图
         # ======================================================================
-        print(f"\033[38;5;152m[{symbol}] 步骤 3: 生成并分析多时间框架的K线图\033[0m")
-        LOGGER.info(f"[{symbol}] 步骤 3: 生成并分析多时间框架的K线图")
+        print(f"\033[38;5;152m[{symbol}] 步骤 3: 生成并分析1h K线图\033[0m")
+        LOGGER.info(f"[{symbol}] 步骤 3: 生成并分析1h K线图")
         
         # --- VLM分析前后动态切换代理 ---
         import os
@@ -319,11 +314,9 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         clear_proxy_env()
         try:
             def perform_vlm_analysis():
-                short_term_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "Short-Term", "1h")
-                daily_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, daily_data, "Daily", "1d")
-                fine_grained_analysis, _ = _generate_and_analyze_kline(vlm_analyzer, fine_grained_data, "15-Min", "15m")
-                return short_term_analysis, daily_analysis, fine_grained_analysis
-            short_term_analysis, daily_analysis, fine_grained_analysis = track_process('vlm_analysis', perform_vlm_analysis)
+                analysis_1h, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "1H", "1h")
+                return analysis_1h
+            analysis_1h = track_process('vlm_analysis', perform_vlm_analysis)
         finally:
             restore_proxy_env(_orig_proxy_env)
 
@@ -363,12 +356,8 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                 analyzer = DeepSeekAnalyzer()
                 decision = analyzer.get_trade_decision(
                     quant_signals=quant_signal_data,
-                    twitter_data=market_news, 
-                    kline_analysis={
-                        "short_term": short_term_analysis,
-                        "daily": daily_analysis,
-                        "15_min": fine_grained_analysis
-                    },
+                    twitter_data=market_news,
+                    kline_analysis={"1h": analysis_1h},
                     current_position=current_position,
                     current_balance=current_balance,
                     symbol=symbol
