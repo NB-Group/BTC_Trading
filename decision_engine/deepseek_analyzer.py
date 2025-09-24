@@ -84,7 +84,77 @@ class DeepSeekAnalyzer:
         根据所有输入信息，请求DeepSeek LLM做出最终的交易决策。
         """
         prompt = self._construct_prompt(quant_signals, twitter_data, kline_analysis, current_position, current_balance, symbol)
-        return self._make_api_call(prompt)
+        decision = self._make_api_call(prompt)
+
+        # 若是横盘（或决策为HOLD），尝试做突破区间预测
+        try:
+            one_h_analysis = kline_analysis.get('1h') if kline_analysis else None
+            if one_h_analysis and isinstance(one_h_analysis, str):
+                if decision.get('decision', '').upper() == 'HOLD' or '震荡' in one_h_analysis or '横盘' in one_h_analysis:
+                    decision['range_forecast'] = self._predict_range_breakout(one_h_analysis, symbol)
+        except Exception as e:
+            LOGGER.warning(f"横盘突破预测失败: {e}")
+        return decision
+
+    def _predict_range_breakout(self, one_h_text: str, symbol: str) -> Dict[str, Any]:
+        """基于1H分析文本，调用LLM估计：横盘上下沿、概率、预计持续时间、触发条件与挂单计划。"""
+        range_prompt = f"""
+你现在的任务：从下面的 1H 技术分析文本中，如果存在震荡/横盘/区间特征，提取其区间上沿与下沿，并做出突破预测计划。
+要求：
+1. 严格输出 JSON，不要多余文字；数字用浮点。
+2. 如果未能识别有效区间，输出 reason 并置 is_range=false。
+3. 若存在区间：
+   - 估计上下沿价位 (support, resistance)；若文本无明确价位，可基于语义推测一个合理整数价（保留到整数或50/100步长），并标记 inferred=true。
+   - 估计未来 2-8 小时内向上/向下突破概率 (0-1)。两者和不必为1，但需合理。
+   - 给出预计横盘剩余持续时间（分钟），以及若突破向上/向下的初步目标价 (target_up / target_down)。
+   - 给出一个简单执行计划：
+       * plan.long_trigger: 上破触发条件 (如 price > resistance * 1.002)
+       * plan.short_trigger: 下破触发条件 (如 price < support * 0.998)
+       * plan.long_cancel / short_cancel: 何种情况取消等待。
+       * plan.initial_sl_pct / tp_pct: 推荐止损/止盈百分比。
+4. 若当前结构不适合提前挂单（例如波动剧烈或无效区间），给出 is_range=false 和 reason。
+
+【1H分析原文】\n{one_h_text}\n
+请直接返回 JSON：
+{{
+  "is_range": true,
+  "support": 0,
+  "resistance": 0,
+  "inferred": false,
+  "prob_break_up": 0.0,
+  "prob_break_down": 0.0,
+  "expected_remaining_minutes": 0,
+  "target_up": 0,
+  "target_down": 0,
+  "plan": {{
+     "long_trigger": "",
+     "short_trigger": "",
+     "long_cancel": "",
+     "short_cancel": "",
+     "initial_sl_pct": 0.0,
+     "initial_tp_pct": 0.0
+  }},
+  "reason": ""
+}}
+"""
+        try:
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[{"role": "user", "content": range_prompt}],
+                temperature=0.3,
+                max_tokens=600,
+                stream=False,
+                response_format={"type": "json_object"},
+            )
+            raw = response.choices[0].message.content
+            parsed = self._parse_llm_json_response(raw)
+            # 最低字段保障
+            for k, v in {"is_range": False, "reason": "模型未给出说明"}.items():
+                parsed.setdefault(k, v)
+            return parsed
+        except Exception as e:
+            LOGGER.warning(f"范围预测调用失败: {e}")
+            return {"is_range": False, "reason": f"range_forecast_error: {e}"}
 
     @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
     def _make_api_call(self, prompt: str) -> Dict[str, Any]:
@@ -246,34 +316,32 @@ class DeepSeekAnalyzer:
 
         system_prompt = f"""
 # 角色
-你是一名顶级的加密货币**期货**短线交易策略师，专注于小时级别（1H）K线的短线快进快出操作。你必须在大量信息中精准识别关键信号，尤其关注能在1-6小时内带来收益的短线机会。你正在为 **{asset_name}** 这个币种做决策。
+你是一名顶级的加密货币**期货**短线交易策略师，当前策略已精简为单一 **1小时 (1H)** 时间框的快进快出操作。你必须在有限信息中精准识别 1H 级别可在 1-6 小时内实现的收益机会。你正在为 **{asset_name}** 这个币种做决策。
 
 {lessons_part}
 # 核心原则
 1.  **顺势与机会捕捉 (最高优先级)**:
     *   **默认中性**: 在证据不足或信号冲突时，首选 `HOLD`，避免勉强进场。
     *   **震荡行情处理**: 当VLM分析识别出市场处于横盘震荡（例如布林带收窄，价格在区间内波动）时，主要策略应为 `HOLD`，耐心等待明确的突破信号，避免在区间内被反复止损。
-    *   **牛市思维**: 在市场整体上涨或有强烈看涨信号时（如VLM分析显示多头排列、关键支撑位反弹），优先考虑 **LONG** 机会；在无明确利空的情况下，不因局部回撤而做空。
+    *   **做多优先**: 当出现多头排列、关键支撑位反弹或放量突破等看涨共振信号时，优先考虑 **LONG**；不要因为局部回撤而轻易做空。
     *   **陷阱识别 (Trap Detection)**:
-        *   **弱反弹陷阱 (Weak Bounce Trap)**: 如果VLM分析的看涨信号，是出现在一段**下跌趋势之后**的**首次**弱势反弹（例如，价格刚刚重新站上短期均线，但K线实体小，缺乏力量），那么**必须**将其视为潜在的“多头陷阱”。此时，最终决策应**优先选择 `HOLD`**，而不是 `LONG`，并在`reasoning`中说明“正在观察反弹的有效性，警惕多头陷阱”。
-    *   **空头门槛（更高要求）**: 只有在以下至少两项同时满足时，才可考虑 `SHORT`：
-        1) VLM 1H 结论为明确看跌并给出关键位被跌破；
-        2) 内部量化模型矩阵中至少一个模型为 `SELL` 或出现强烈的空头动量信号；
-        3) 新闻情报出现突发性实质性利空（可验证来源）；
-        4) 更高周期（日线）不处于明确的多头趋势，或多头趋势出现关键位失守。
-    *   **果断出击**: 当多个来源（VLM、量化信号、新闻）指向同一方向时，应果断决策，提高置信度。
-    *   **短线盈利优先**: 只要VLM技术分析显示明确的短线盈利机会（1H K线），就优先考虑短线盈利机会，忽略长期金融市场趋势。
+        *   **弱反弹陷阱 (Weak Bounce Trap)**: 若看涨信号出现在一段明显下跌后的首次弱反弹（K线实体小、量能不足、仅略高于短均线），优先 `HOLD` 并在`reasoning`说明“观察反弹有效性，警惕多头陷阱”。
+    *   **空头门槛（更高要求）**: 仅当以下至少两项同时满足时，才可考虑 `SHORT`：
+        1) 1H 级别结论明确看跌且关键位被有效跌破；
+        2) 内部量化模型矩阵中至少一个模型为 `SELL` 或出现强烈空头动量；
+        3) 新闻情报出现突发、可信的实质性利空。
+    *   **果断出击**: 当多个来源（VLM、量化信号、新闻）指向同一方向时，提高置信度并果断执行。
+    *   **短线盈利优先**: 只基于 1H 结构与动量判断机会；分钟级噪声忽略。
 
 2.  **风险管理与资金保护**:
-    *   **资金优先 (硬性要求)**: 你的首要任务是确保能成功下单。如果决策是开仓（LONG/SHORT），你必须根据当前余额和市场价格计算能够满足交易所 **最小开仓量** 的最低杠杆。
-      *   **计算公式**: `所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)` (例如BTC最小开仓量为0.01, ETH为0.1)
+    *   **资金优先 (硬性要求)**: 若决策为开仓（LONG/SHORT），必须计算满足交易所**最小开仓量**所需的最低杠杆。
+      *   **计算公式**: `所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)`
       *   **决策逻辑**:
-        *   计算出`所需杠杆`后，向上取整（例如，2.1倍计算为3倍）。
-        *   如果`所需杠杆` > 5 (最大允许杠杆)，则最终决策必须是 `HOLD`，并在 `reasoning` 中明确指出“因资金不足，即使5倍杠杆也无法满足最小开仓量，故放弃交易”。
-        *   否则，在 `trade_params` 中必须使用计算出的`所需杠杆`。
-    *   **趋势一致性**: 若更高周期（日线）呈现明确上升趋势，则避免逆势做空，除非满足“空头门槛”。若呈现明确下降趋势，空头亦需满足1H关键位与动量共振。
-    *   **信号冲突处理**: 当信号冲突时，综合评估风险与机遇。风险信号不再具有绝对优先权，而是作为调整仓位和置信度的依据；若仍无法形成清晰优势，选择 `HOLD`。
-    *   **极端行情处理**: 在市场极端恐慌或狂热时，若无持仓，首选 `HOLD`；若有持仓，则根据盈利情况和短期趋势决定是否平仓。
+        *   计算出`所需杠杆`后，向上取整（例如 2.1→3）。
+        *   若`所需杠杆` > 5，则最终决策为 `HOLD`，并在 `reasoning` 明确“资金不足，5倍杠杆亦无法满足最小开仓量”。
+        *   否则，在 `trade_params` 中使用该杠杆值。
+    *   **信号冲突处理**: 当内部策略信号冲突时，参考 1H 趋势结构；若无明确方向则 `HOLD`。
+    *   **极端行情处理**: 极端恐慌/狂热时，无持仓→`HOLD`；有持仓→结合盈利与 1H 趋势是否衰减决定平仓。
 
 # 操作指南
 - **操作定义**:
@@ -291,16 +359,9 @@ class DeepSeekAnalyzer:
   - **持有逻辑**: 如果持有仓位与短期趋势方向一致，即使有小幅回调，也应继续持有，以捕捉更大的波动。
 
 # 信息解读
-- **内部量化模型矩阵**: 你会收到一个包含多个策略信号的列表。每个信号都有独立的来源和逻辑。
-  - **信号一致性**: 如果多个策略（如RF4背离和MA交叉）发出相同方向的信号（都是BUY或都是SELL），这是一个强烈的共振信号，应显著提高决策置信度。
-  - **信号冲突**: 如果策略信号相互矛盾（一个BUY，一个SELL），这表明市场方向不明朗，风险较高。在这种情况下，应优先考虑 `HOLD`，或至少降低仓位和杠杆，并更加依赖VLM对当前K线形态的直接解读来打破僵局。
-  - **单一信号**: 如果只有一个策略发出明确信号，应将其视为重要参考，但不是决定性因素，需要与其他信息源（VLM K线分析、新闻）进行交叉验证。
-- **VLM K线分析**: 这是短线决策的核心依据。你现在会收到三个时间周期的分析：`日线 (Daily)`，`1小时线 (1H)` 和 `15分钟线 (15_min)`。
-  - **分析逻辑**: 遵循“日线定方向，小时找区间，分钟定买卖”的原则。
-    1.  **日线 (Daily)**: 首先看日线分析，确定市场当前的大方向（上涨、下跌、震荡）。日线是你的战略地图。
-    2.  **1小时线 (1H)**: 在日线确定的方向上，使用1小时线寻找具体的交易区间和关键的支撑/阻力位。1小时线是你的战术部署。
-    3.  **15分钟线 (15_min)**: 这是执行层面的核心依据。它用于确定精准的入场和出场点。**15分钟线的操作建议权重最高**，但必须与日线和1小时线的大方向不冲突。
-  - **结构化指令**: `15_min` 和 `1H` 的分析会提供结构化的`操作建议`。**你必须严格遵循这些指令**。例如，如果 `15_min` 信号是`做空`，条件是`价格低于65000`，并且1H和日线没有强烈的看涨冲突，那么只有当**当前市场价格**低于65000时，你的决策才能是`SHORT`。如果条件不满足，即使VLM看跌，你的决策也应该是`HOLD`，并在`reasoning`中说明你在等待条件触发。
+- **内部量化模型矩阵**: 多策略共振提升置信度；冲突→`HOLD` 或减弱杠杆。
+- **VLM K线分析 (1H)**: 唯一技术图形来源；用于趋势、结构、关键位、动量与潜在入/出场窗口。
+    - **操作建议解释**: 若 1H 图给出“做多”且条件为“价格高于X”，需验证当前价是否已满足；否则应 `HOLD` 并等待。
 
 # 当前市场状态与持仓记忆
 - **分析时间**: {current_time_utc}
@@ -314,7 +375,7 @@ class DeepSeekAnalyzer:
 {signal_part}
 
 # 分析框架 (必须遵守)
-1.  **识别核心机会**: 结合VLM分析（特别是1H图）和关键新闻，判断是否存在明确的做多或做空机会。若证据不足或冲突，则为 `HOLD`。若为 `SHORT`，请在推理中明确列出满足的“空头门槛”条目。
+1.  **识别核心机会**: 结合 1H VLM 分析与新闻判断是否存在明确多空机会；证据不足或冲突→`HOLD`。若为 `SHORT`，列出满足的“空头门槛”条目。
 2.  **评估持仓状态**: 确定当前是空仓、持有多仓还是空仓，并计算盈亏。
 3.  **整合辅助信号**: 使用内部量化模型和宏观K线分析（日线）来验证或微调决策。
 4.  **风险评估与参数设定**: 基于市场波动性和信号强度，设定合理的杠杆、止盈和止损。
@@ -377,23 +438,12 @@ class DeepSeekAnalyzer:
         return twitter_part
 
     def _format_kline_analysis(self, kline_analysis_dict: Dict[str, Optional[str]]) -> str:
-        """格式化K线分析部分，确保即使部分分析失败也能展示有效的部分。"""
-        kline_part = "## 3. K线图技术分析 (VLM模型提供)\n"
-        
-        valid_analyses = []
-        
-        # 按指定顺序添加分析，并检查有效性（优先展示1H，减少高周期锚定偏差）
-        order = {'short_term': '短期 (1H) K线分析', '15_min': '精细 (15分钟) K线分析', 'daily': '日线 (Daily) K线分析'}
-        
-        for key, title in order.items():
-            analysis = kline_analysis_dict.get(key)
-            if analysis and isinstance(analysis, str) and analysis.strip():
-                valid_analyses.append(f"### {title}\n{analysis.strip()}\n")
-                
-        if not valid_analyses:
-            return kline_part + "\n无有效的K线图分析结果。"
-            
-        return kline_part + "\n".join(valid_analyses)
+        """格式化K线分析部分（仅1H）。"""
+        kline_part = "## 3. K线图技术分析 (1H)\n"
+        analysis = kline_analysis_dict.get('1h') or kline_analysis_dict.get('short_term')
+        if analysis and isinstance(analysis, str) and analysis.strip():
+            return kline_part + f"\n### 1H 技术分析\n{analysis.strip()}\n"
+        return kline_part + "\n无有效的1H K线图分析结果。"
 
     def _format_position_info(self, position_data: Optional[Dict[str, Any]], symbol: str) -> str:
         """格式化当前持仓信息。"""

@@ -388,6 +388,7 @@ VLM分析暂时不可用（网络问题），将基于K线图形态进行基础�
             '4h': {'name': '4小时', 'forecast_period': '未来1-2天'},
             '15m': {'name': '15分钟', 'forecast_period': '未来2-6小时'},
             '30m': {'name': '30分钟', 'forecast_period': '未来4-8小时'},
+            '5m': {'name': '5分钟', 'forecast_period': '未来30-120分钟'},
         }
         
         # 默认使用1小时
