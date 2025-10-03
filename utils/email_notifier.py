@@ -105,13 +105,13 @@ class EmailNotifier:
 
         if execution_success:
             if flow_has_error:
-                status_icon = "⚠️"
+                status_icon = '<i class="fas fa-exclamation-triangle"></i>'
                 status_text = "部分失败（详见流程状态）"
             else:
-                status_icon = "✅" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "⏸️"
-                status_text = "执行成功" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "观望中"
+                status_icon = '<i class="fas fa-check-circle"></i>' if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else '<i class="fas fa-pause-circle"></i>'
+            status_text = "执行成功" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "观望中"
         else:
-            status_icon = "❌"
+            status_icon = '<i class="fas fa-times-circle"></i>'
             status_text = "执行失败"
             
         # 决策类型颜色
@@ -129,11 +129,13 @@ class EmailNotifier:
         <html>
         <head>
             <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <style>
+                * {{ box-sizing: border-box; }}
                 body {{
-                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
                     line-height: 1.6;
-                    color: #333;
+                    color: #495057;
                     max-width: 800px;
                     margin: 0 auto;
                     padding: 20px;
@@ -141,128 +143,194 @@ class EmailNotifier:
                 }}
                 .container {{
                     background: white;
-                    border-radius: 10px;
-                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    border-radius: 16px;
+                    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
                     overflow: hidden;
                 }}
                 .header {{
-                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-                    color: white;
-                    padding: 30px;
-                    text-align: center;
+                    background: #f8f9fa;
+                    padding: 16px 20px;
+                    border-bottom: 1px solid #dee2e6;
                 }}
                 .header h1 {{
                     margin: 0;
-                    font-size: 28px;
-                    font-weight: 300;
+                    font-size: 18px;
+                    font-weight: 600;
+                    color: #495057;
                 }}
                 .header .subtitle {{
-                    margin-top: 10px;
-                    opacity: 0.9;
-                    font-size: 16px;
+                    margin-top: 4px;
+                    font-size: 12px;
+                    color: #6c757d;
                 }}
                 .content {{
-                    padding: 30px;
+                    padding: 24px;
                 }}
                 .decision-card {{
+                    background: #ffffff;
+                    border: 1px solid #e9ecef;
+                    border-radius: 12px;
+                    padding: 20px;
+                    margin-bottom: 20px;
+                    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+                }}
+                .decision-header {{
+                    display: flex;
+                    align-items: center;
+                    gap: 12px;
+                    margin-bottom: 12px;
+                }}
+                .decision-badge {{
                     background: {decision_color};
                     color: white;
-                    padding: 20px;
-                    border-radius: 8px;
-                    text-align: center;
-                    margin-bottom: 25px;
+                    padding: 6px 12px;
+                    border-radius: 20px;
+                    font-size: 12px;
+                    font-weight: 600;
+                    text-transform: uppercase;
+                    letter-spacing: 0.5px;
                 }}
-                .decision-card h2 {{
-                    margin: 0;
-                    font-size: 32px;
-                    font-weight: bold;
+                .status-info {{
+                    margin-left: auto;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    font-size: 13px;
+                    color: #6c757d;
                 }}
-                .decision-card .status {{
-                    margin-top: 10px;
-                    font-size: 18px;
-                    opacity: 0.9;
+                .decision-time {{
+                    font-size: 12px;
+                    color: #adb5bd;
+                    margin-top: 8px;
                 }}
                 .info-grid {{
                     display: grid;
                     grid-template-columns: 1fr 1fr;
-                    gap: 20px;
-                    margin-bottom: 25px;
+                    gap: 16px;
+                    margin-bottom: 24px;
                 }}
                 .info-card {{
                     background: #f8f9fa;
-                    padding: 20px;
+                    border: 1px solid #e9ecef;
                     border-radius: 8px;
-                    border-left: 4px solid #007bff;
+                    padding: 16px;
                 }}
                 .info-card h3 {{
-                    margin: 0 0 10px 0;
-                    color: #007bff;
-                    font-size: 18px;
+                    margin: 0 0 8px 0;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: #495057;
                 }}
                 .info-card p {{
                     margin: 0;
-                    font-size: 14px;
+                    font-size: 13px;
+                    color: #6c757d;
                 }}
                 .section {{
-                    margin-bottom: 25px;
+                    margin-bottom: 20px;
                 }}
                 .section h3 {{
+                    font-size: 14px;
+                    font-weight: 600;
                     color: #495057;
-                    border-bottom: 2px solid #e9ecef;
-                    padding-bottom: 10px;
-                    margin-bottom: 15px;
+                    margin-bottom: 12px;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
                 }}
                 .section p {{
-                    background: #f8f9fa;
-                    padding: 15px;
-                    border-radius: 6px;
+                    background: #ffffff;
+                    border: 1px solid #e9ecef;
+                    border-radius: 8px;
+                    padding: 16px;
                     margin: 0;
-                    line-height: 1.8;
+                    line-height: 1.6;
+                    color: #495057;
                 }}
                 .error-section {{
-                    background: #f8d7da;
-                    border: 1px solid #f5c6cb;
+                    background: #fff5f5;
+                    border: 1px solid #fed7d7;
                     border-radius: 8px;
-                    padding: 20px;
-                    margin-top: 20px;
+                    padding: 16px;
+                    margin-top: 16px;
                 }}
                 .error-section h3 {{
-                    color: #721c24;
+                    color: #c53030;
                     margin-top: 0;
+                    font-size: 14px;
                 }}
                 .error-section p {{
-                    color: #721c24;
+                    color: #c53030;
                     margin: 0;
                 }}
                 .footer {{
-                    background: #e9ecef;
-                    padding: 20px;
+                    background: #f8f9fa;
+                    padding: 16px;
                     text-align: center;
                     color: #6c757d;
-                    font-size: 14px;
+                    font-size: 12px;
+                    border-top: 1px solid #dee2e6;
+                }}
+                /* 参数键值行样式 */
+                .kv {{
+                    display: grid;
+                    gap: 8px;
+                }}
+                .kv .row {{
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    background: #f8f9fa;
+                    border: 1px solid #e9ecef;
+                    border-radius: 6px;
+                    padding: 12px;
+                }}
+                .kv .row span {{
+                    color: #6c757d;
+                    font-size: 12px;
+                    font-weight: 500;
+                }}
+                .kv .row strong {{
+                    color: #495057;
+                    font-size: 13px;
+                    font-weight: 600;
+                }}
+
+                /* 移动端优化 */
+                @media (max-width: 520px) {{
+                    body {{ padding: 12px; }}
+                    .content {{ padding: 16px; }}
+                    .info-grid {{ grid-template-columns: 1fr; }}
+                    .header h1 {{ font-size: 16px; }}
                 }}
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🤖 BTC 期货智能决策系统</h1>
+                    <h1><i class="fas fa-robot"></i> BTC 期货智能决策系统</h1>
                     <div class="subtitle">自动交易决策通知</div>
                 </div>
                 
                 <div class="content">
                     <div class="decision-card">
-                        <h2>{status_icon} {decision}</h2>
-                        <div class="status">{status_text}</div>
+                        <div class="decision-header">
+                            <span class="decision-badge">{decision}</span>
+                            <div class="status-info">
+                                <span>{status_icon}</span>
+                                <span>{status_text}</span>
+                            </div>
+                        </div>
+                        <div class="decision-time">{current_time}</div>
                     </div>
                     
                     <div class="info-grid">
                         <div class="info-card">
-                            <h3>📊 置信度</h3>
+                            <h3><i class="fas fa-chart-line"></i> 置信度</h3>
                             <p>{confidence:.1%}</p>
                         </div>
                         <div class="info-card">
-                            <h3>⏰ 决策时间</h3>
+                            <h3><i class="fas fa-clock"></i> 决策时间</h3>
                             <p>{current_time}</p>
                         </div>
         """
@@ -275,37 +343,37 @@ class EmailNotifier:
                 pos_desc = position_snapshot.get('desc', '')
                 html += f"""
                         <div class="info-card">
-                            <h3>💰 持仓盈亏</h3>
+                            <h3><i class="fas fa-dollar-sign"></i> 持仓盈亏</h3>
                             <p style="font-weight: 600; color: {pnl_color};">{pnl_prefix}${abs(pnl_usd):.2f} USDT</p>
                             <div style="font-size: 12px; color: #6c757d;">{pos_desc}</div>
                         </div>
                 """
             except Exception:
                 pass
-        html += """
+        html += f"""
                     </div>
                     
                     <div class="section">
-                        <h3>🎯 交易参数</h3>
-                        <p>
-                            <strong>杠杆:</strong> {trade_params.get('leverage', 'N/A')}x<br>
-                            <strong>止盈:</strong> {trade_params.get('take_profit_pct', 'N/A')}%<br>
-                            <strong>止损:</strong> {trade_params.get('stop_loss_pct', 'N/A')}%
-                        </p>
+                        <h3><i class="fas fa-cog"></i> 交易参数</h3>
+                        <div class="kv">
+                            <div class="row"><span>杠杆</span><strong>{trade_params.get('leverage', 'N/A')}x</strong></div>
+                            <div class="row"><span>止盈</span><strong>{trade_params.get('take_profit_pct', 'N/A')}%</strong></div>
+                            <div class="row"><span>止损</span><strong>{trade_params.get('stop_loss_pct', 'N/A')}%</strong></div>
+                        </div>
                     </div>
                     
                     <div class="section">
-                        <h3>🧠 决策理由</h3>
+                        <h3><i class="fas fa-brain"></i> 决策理由</h3>
                         <p>{reasoning}</p>
                     </div>
                     
                     <div class="section">
-                        <h3>🔍 关键信号</h3>
+                        <h3><i class="fas fa-search"></i> 关键信号</h3>
                         <p>{key_signals}</p>
                     </div>
                     
                     <div class="section">
-                        <h3>⚠️ 风险评估</h3>
+                        <h3><i class="fas fa-exclamation-triangle"></i> 风险评估</h3>
                         <p>{risk_assessment}</p>
                     </div>
         """
@@ -317,7 +385,7 @@ class EmailNotifier:
         if error_msg:
             html += f"""
                     <div class="error-section">
-                        <h3>❌ 执行错误</h3>
+                        <h3><i class="fas fa-times-circle"></i> 执行错误</h3>
                         <p>{error_msg}</p>
                     </div>
             """
@@ -340,16 +408,16 @@ class EmailNotifier:
         """创建流程运行状态的HTML内容"""
         html = """
                     <div class="section">
-                        <h3>🔧 流程运行状态</h3>
+                        <h3><i class="fas fa-cogs"></i> 流程运行状态</h3>
         """
         
         # 流程状态映射
         status_icons = {
-            'success': '✅',
-            'error': '❌',
-            'warning': '⚠️',
-            'info': 'ℹ️',
-            'pending': '⏳'
+            'success': '<i class="fas fa-check-circle"></i>',
+            'error': '<i class="fas fa-times-circle"></i>',
+            'warning': '<i class="fas fa-exclamation-triangle"></i>',
+            'info': '<i class="fas fa-info-circle"></i>',
+            'pending': '<i class="fas fa-clock"></i>'
         }
         
         # 流程顺序
@@ -392,7 +460,7 @@ class EmailNotifier:
                 status_color = status_colors.get(status, '#6c757d')
                 
                 html += f"""
-                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; border-left: 4px solid {status_color};">
+                        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 10px; border: 2px solid {status_color};">
                             <div style="display: flex; align-items: center; margin-bottom: 8px;">
                                 <span style="font-size: 18px; margin-right: 10px;">{icon}</span>
                                 <strong style="color: #495057;">{process_name}</strong>
@@ -404,7 +472,7 @@ class EmailNotifier:
                     html += f'<div style="color: #6c757d; font-size: 14px; margin-left: 28px;">{message}</div>'
                 
                 if error:
-                    html += f'<div style="color: #dc3545; font-size: 14px; margin-left: 28px; margin-top: 5px;">❌ {error}</div>'
+                    html += f'<div style="color: #dc3545; font-size: 14px; margin-left: 28px; margin-top: 5px;"><i class="fas fa-times-circle"></i> {error}</div>'
                 
                 html += "</div>"
         
@@ -493,25 +561,25 @@ class EmailNotifier:
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>🚨 系统错误通知</h1>
+                    <h1><i class="fas fa-exclamation-triangle"></i> 系统错误通知</h1>
                 </div>
                 
                 <div class="content">
                     <div class="error-card">
-                        <h2>❌ {error_type}</h2>
+                        <h2><i class="fas fa-times-circle"></i> {error_type}</h2>
                         <p>{error_msg}</p>
                     </div>
                     
                     <div class="info-section">
-                        <h3>⏰ 错误时间</h3>
+                        <h3><i class="fas fa-clock"></i> 错误时间</h3>
                         <p>{current_time}</p>
                     </div>
         """
         
         if context:
-            html += """
+            html += f"""
                     <div class="info-section">
-                        <h3>📋 错误上下文</h3>
+                        <h3><i class="fas fa-clipboard-list"></i> 错误上下文</h3>
                         <p>
             """
             for key, value in context.items():
