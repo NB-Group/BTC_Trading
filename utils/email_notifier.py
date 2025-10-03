@@ -88,13 +88,28 @@ class EmailNotifier:
         key_signals = decision_data.get('key_signals_detected', '')
         risk_assessment = decision_data.get('risk_assessment', '')
         trade_params = decision_data.get('trade_params', {})
+        position_snapshot = decision_data.get('position_snapshot')
         
         current_time = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')
         
-        # 决策状态图标
+        # 决策状态图标（根据流程状态自动识别“部分失败”）
+        flow_has_error = False
+        if process_status:
+            try:
+                for _k, _v in process_status.items():
+                    if isinstance(_v, dict) and _v.get('status') == 'error':
+                        flow_has_error = True
+                        break
+            except Exception:
+                pass
+
         if execution_success:
-            status_icon = "✅" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "⏸️"
-            status_text = "执行成功" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "观望中"
+            if flow_has_error:
+                status_icon = "⚠️"
+                status_text = "部分失败（详见流程状态）"
+            else:
+                status_icon = "✅" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "⏸️"
+                status_text = "执行成功" if decision in ['LONG', 'SHORT', 'CLOSE_LONG', 'CLOSE_SHORT'] else "观望中"
         else:
             status_icon = "❌"
             status_text = "执行失败"
@@ -250,6 +265,24 @@ class EmailNotifier:
                             <h3>⏰ 决策时间</h3>
                             <p>{current_time}</p>
                         </div>
+        """
+        # 可选：持仓盈亏卡片
+        if position_snapshot and isinstance(position_snapshot, dict):
+            try:
+                pnl_usd = float(position_snapshot.get('pnl_usd', 0.0))
+                pnl_color = '#28a745' if pnl_usd >= 0 else '#dc3545'
+                pnl_prefix = '+' if pnl_usd >= 0 else '-'
+                pos_desc = position_snapshot.get('desc', '')
+                html += f"""
+                        <div class="info-card">
+                            <h3>💰 持仓盈亏</h3>
+                            <p style="font-weight: 600; color: {pnl_color};">{pnl_prefix}${abs(pnl_usd):.2f} USDT</p>
+                            <div style="font-size: 12px; color: #6c757d;">{pos_desc}</div>
+                        </div>
+                """
+            except Exception:
+                pass
+        html += """
                     </div>
                     
                     <div class="section">
