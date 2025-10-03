@@ -390,6 +390,23 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     trader.execute_decision(final_decision)
                 
                 track_process('trade_execution', execute_trade)
+                # 注入持仓盈亏快照（若存在）
+                try:
+                    pos_info = trader.get_position(symbol)
+                    if pos_info:
+                        # 统一处理net/long/short
+                        pos_side = pos_info.get('posSide')
+                        pos_amount = float(pos_info.get('pos', 0) or 0)
+                        avg_px = float(pos_info.get('avgPx', 0) or 0)
+                        upl = pos_info.get('upl')
+                        upl_usd = float(upl) if upl is not None else (0.0 if avg_px == 0 else (float(trader.exchange.fetch_ticker(symbol)['last']) - avg_px) * pos_amount)
+                        side_desc = '多仓' if (pos_side == 'long' or (pos_side == 'net' and pos_amount > 0)) else ('空仓' if (pos_side == 'short' or (pos_side == 'net' and pos_amount < 0)) else '无仓')
+                        final_decision['position_snapshot'] = {
+                            'pnl_usd': upl_usd,
+                            'desc': f"{side_desc} | 数量: {pos_amount} | 开仓均价: ${avg_px}"
+                        }
+                except Exception:
+                    pass
                 email_notifier.send_decision_notification(final_decision, execution_success=True, process_status=process_status)
             except Exception as e:
                 error_msg = f"交易执行失败: {str(e)}"
