@@ -17,6 +17,7 @@ from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
 from execution_engine.okx_trader import OKXTrader
 from utils.email_notifier import EmailNotifier
 from market_scanner import scan_for_opportunities # 导入市场扫描器
+from utils.auto_updater import AutoUpdater, graceful_restart
 
 def save_decision_report(report: Dict[str, Any]):
     """将决策报告保存到文件。"""
@@ -525,6 +526,15 @@ def main():
     print("\033[38;5;102m" + "──────────────────────────────────────────────────────────────────────────────" + "\033[0m")  # 莫兰迪灰绿色
 
     job = partial(run_trading_cycle, skip_llm=args.skip_llm)
+
+    # ====== 启动自动更新后台线程（可选） ======
+    def _on_code_updated():
+        # 发现更新后，优雅重启当前进程
+        graceful_restart()
+    try:
+        AutoUpdater(on_updated=_on_code_updated).start()
+    except Exception as e:
+        LOGGER.warning(f"AutoUpdater 启动失败: {e}")
 
     if args.now:
         print("\033[38;5;143m[启动] 接收到 --now 参数，立即执行一次决策周期...\033[0m")  # 莫兰迪暖灰色
