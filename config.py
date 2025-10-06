@@ -40,6 +40,17 @@ DECISION_RULES = {
     'strict_long_trigger': os.getenv('STRICT_LONG_TRIGGER', 'true').lower() == 'true',
 }
 
+# ----------------- 自动更新与热重载 -----------------
+AUTO_UPDATE = {
+    'enabled': os.getenv('AUTO_UPDATE_ENABLED', 'false').lower() == 'true',
+    'interval_seconds': int(os.getenv('AUTO_UPDATE_INTERVAL', '300')),
+    'branch': os.getenv('AUTO_UPDATE_BRANCH', 'main'),
+    # update_strategy: 'hard_reset' | 'pull_ff_only' | 'pull_rebase' | 'pull_merge'
+    'update_strategy': os.getenv('AUTO_UPDATE_STRATEGY', 'hard_reset'),
+    # 保护本地修改：若存在未提交/未追踪文件则不更新
+    'protect_local_changes': os.getenv('AUTO_UPDATE_PROTECT_LOCAL', 'true').lower() == 'true',
+}
+
 # ==============================================================================
 # 社交媒体与情报分析 (Social Media & Intelligence)
 # ==============================================================================

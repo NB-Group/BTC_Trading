@@ -90,6 +90,30 @@ python main.py --now --skip-llm
 python main.py
 ```
 
+### 自动更新与热重载（可选）
+
+系统内置 Git 自动更新器：后台定时检查远端分支是否有新提交，检测到更新后自动拉取并优雅重启进程（不会出现僵尸线程）。
+
+配置位于 `config.py` 的 `AUTO_UPDATE`：
+
+```python
+AUTO_UPDATE = {
+    'enabled': False,            # 是否启用自动更新
+    'interval_seconds': 300,     # 检查间隔（秒）
+    'branch': 'main',            # 监控的分支
+}
+```
+
+也可通过环境变量控制：
+
+```bash
+set AUTO_UPDATE_ENABLED=true
+set AUTO_UPDATE_INTERVAL=300
+set AUTO_UPDATE_BRANCH=main
+```
+
+注意：该机制会执行硬重置 `git reset --hard origin/<branch>`，请勿在运行目录保留未提交的本地修改。
+
 ### 启动仪表板
 ```bash
 streamlit run dashboard.py    
@@ -164,13 +188,6 @@ MACRO_ECONOMIC_KEYWORDS = [
 ## ⚠️ 免责声明
 
 本软件仅供学习和研究使用。加密货币交易存在高风险，可能导致资金损失。使用本软件进行实际交易的风险由用户自行承担。作者不对任何交易损失承担责任。
-
-## 📞 联系方式
-
-如有问题或建议，请通过以下方式联系：
-
-- 提交 Issue: [GitHub Issues](https://github.com/yourusername/btc-trading-system/issues)
-- 邮箱: your.email@example.com
 
 ---
 
