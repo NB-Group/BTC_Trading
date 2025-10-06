@@ -28,6 +28,18 @@ DEFAULTS = {
     'model_name': 'btc-crossover-regression-v1', # 指定要用于实时信号的主模型
 }
 
+# ================= 交易决策规则（可调） =================
+# - vlm_priority_weight: DeepSeek综合决策时，VLM结论的权重(0-1)。
+# - cautious_rebound: 当识别为下跌后的弱反弹时，仅允许“小仓试探/等待突破确认”。
+# - probe_position_ratio: 开启试探模式时，相比常规建议仓位的比例（0-1）。
+# - strict_long_trigger: 要求VLM给出的做多信号必须带“价格高于X并放量/收盘确认”等条件才视为有效。
+DECISION_RULES = {
+    'vlm_priority_weight': float(os.getenv('VLM_PRIORITY_WEIGHT', '0.7')),
+    'cautious_rebound': os.getenv('CAUTIOUS_REBOUND', 'true').lower() == 'true',
+    'probe_position_ratio': float(os.getenv('PROBE_POSITION_RATIO', '0.3')),
+    'strict_long_trigger': os.getenv('STRICT_LONG_TRIGGER', 'true').lower() == 'true',
+}
+
 # ==============================================================================
 # 社交媒体与情报分析 (Social Media & Intelligence)
 # ==============================================================================
