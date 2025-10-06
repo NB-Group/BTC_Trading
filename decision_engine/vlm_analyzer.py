@@ -293,6 +293,12 @@ class VLMAnalyzer:
             except Exception as e:
                 LOGGER.warning(f"提取价格范围信息失败: {e}")
         
+        # 从配置注入决策风格
+        cautious_rebound = getattr(config, 'DECISION_RULES', {}).get('cautious_rebound', True)
+        strict_long_trigger = getattr(config, 'DECISION_RULES', {}).get('strict_long_trigger', True)
+        cautious_clause = "*   **弱反弹谨慎**: 若出现在下跌后的弱反弹（阳线实体小、量能不足、仅略上穿短均线），默认结论为中性/观望；除非有放量上破关键阻力且收盘确认。" if cautious_rebound else ""
+        strict_long_clause = "    *   **做多有效性校验**: 仅当满足以下至少一项，方可输出\"做多\": 1) 放量上破并收于关键阻力/布林上轨之上; 2) 多头排列+回踩不破并重新放量; 3) RSI>50且价量共振。若未满足，请给出'观望'并注明等待条件。" if strict_long_trigger else ""
+
         prompt_text = f"""
 你是一名精通技术分析的资深量化交易员。请仔细分析这张 **{symbol}** 的{timeframe_info['name']}K线图。
 你的分析必须只使用简体中文。
@@ -317,6 +323,7 @@ class VLMAnalyzer:
     3) 更高周期趋势未呈现明确多头，或多头关键位失守；
     4) 形态上有明确的反转/延续空头形态并得到成交量确认。
 *   **顺大级别而行**: 如更高周期呈现显著多头结构，避免因短期回撤得出看跌结论，除非满足“做空门槛”。
+{cautious_clause}
 
 **你的分析任务:**
 1.  **当前趋势与动能**:
@@ -336,6 +343,7 @@ class VLMAnalyzer:
         *   **条件**: [立即执行 / 价格高于 / 价格低于]
         *   **价格**: [触发条件的价格，例如 65000 USDT。如果“条件”是“立即执行”，则填“N/A”]
         *   **理由**: [简明扼要地说明给出此建议的原因]
+{strict_long_clause}
 
 请以结构化、逻辑清晰的方式提供你的专业分析，并在报告标题中明确标注这是{timeframe_info['name']}技术分析报告。
 """
