@@ -38,6 +38,8 @@ DECISION_RULES = {
     'cautious_rebound': os.getenv('CAUTIOUS_REBOUND', 'true').lower() == 'true',
     'probe_position_ratio': float(os.getenv('PROBE_POSITION_RATIO', '0.3')),
     'strict_long_trigger': os.getenv('STRICT_LONG_TRIGGER', 'true').lower() == 'true',
+    # 允许仅凭VLM做单（其余来源仅做反证）。
+    'vlm_solo_trade': os.getenv('VLM_SOLO_TRADE', 'true').lower() == 'true',
 }
 
 # ----------------- 自动更新与热重载 -----------------
