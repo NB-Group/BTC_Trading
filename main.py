@@ -43,7 +43,7 @@ def print_decision_report(report: Dict[str, Any]):
     color = color_map.get(decision, "\033[0m") # 默认无颜色
     print(f"\033[38;5;109m  - 最终决策: {color}{decision}\033[0m")
         
-    print(f"\033[38;5;109m  - 置信度: {report.get('confidence', 'N/A')}\033[0m")
+    # 置信度字段已移除
     trade_params = report.get('trade_params')
     if trade_params:
         print("\033[38;5;109m  - 交易参数:\033[0m")
@@ -418,7 +418,6 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     error_msg, 
                     context={
                         "decision": final_decision.get("decision"),
-                        "confidence": final_decision.get("confidence"),
                         "trade_params": str(final_decision.get("trade_params"))
                     }
                 )

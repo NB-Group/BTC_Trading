@@ -283,9 +283,9 @@ if quant_signal:
     # 模型名称
     signal_cols[2].metric("模型", config.DEFAULTS['model_name'])
     
-    # 置信度指示器
-    confidence_color = "🟢" if abs(predicted_return) > 0.5 else "🟡" if abs(predicted_return) > 0.1 else "🔴"
-    signal_cols[3].metric("信号强度", f"{confidence_color}")
+    # 信号强度指示器（用预测幅度近似展示）
+    strength = "🟢" if abs(predicted_return) > 0.5 else "🟡" if abs(predicted_return) > 0.1 else "🔴"
+    signal_cols[3].metric("信号强度", strength)
     
     # 详细信息
     with st.expander("📋 模型分析详情"):
@@ -327,20 +327,11 @@ if report:
     st.markdown("**核心分析理由:**")
     st.write(reasoning)
     
-    # 显示置信度和风险评估
+    # 显示建议仓位和风险评估
     col1, col2 = st.columns(2)
     with col1:
-        confidence = report.get('confidence', 0.0)
-        if confidence >= 0.7:
-            col1.success(f"**置信度**: {confidence:.1%}")
-        elif confidence >= 0.5:
-            col1.warning(f"**置信度**: {confidence:.1%}")
-        else:
-            col1.error(f"**置信度**: {confidence:.1%}")
-    
-    with col2:
         trade_size = report.get('suggested_trade_size', 0.0)
-        col2.metric("建议仓位", f"{trade_size:.1%}")
+        col1.metric("建议仓位", f"{trade_size:.1%}")
     
     risk_assessment = report.get('risk_assessment', '无风险评估')
     if risk_assessment != '无风险评估':
@@ -354,7 +345,6 @@ if report:
         col1, col2 = st.columns(2)
         with col1:
             st.metric("决策", decision)
-            st.metric("置信度", f"{confidence:.1%}")
         with col2:
             st.metric("建议仓位", f"{trade_size:.1%}")
             if key_signals != '无关键风险信号':

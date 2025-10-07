@@ -17,7 +17,6 @@ def main():
 
     decision = {
         "decision": "LONG",
-        "confidence": 0.82,
         "reasoning": "测试邮件：验证模板、图标与f-string渲染是否正确。",
         "key_signals_detected": "MA交叉；成交量放大；RSI回踩50上方",
         "risk_assessment": "波动中等，控制仓位，严格止损。",
