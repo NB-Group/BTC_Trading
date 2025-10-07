@@ -83,7 +83,6 @@ class EmailNotifier:
     def _create_decision_email_html(self, decision_data: Dict[str, Any], execution_success: bool, error_msg: str = None, process_status: Dict[str, Any] = None) -> str:
         """创建决策邮件的HTML内容"""
         decision = decision_data.get('decision', 'UNKNOWN').upper()
-        confidence = decision_data.get('confidence', 0)
         reasoning = decision_data.get('reasoning', '')
         key_signals = decision_data.get('key_signals_detected', '')
         risk_assessment = decision_data.get('risk_assessment', '')
@@ -325,10 +324,7 @@ class EmailNotifier:
                     </div>
                     
                     <div class="info-grid">
-                        <div class="info-card">
-                            <h3><i class="fas fa-chart-line"></i> 置信度</h3>
-                            <p>{confidence:.1%}</p>
-                        </div>
+                        
                         <div class="info-card">
                             <h3><i class="fas fa-clock"></i> 决策时间</h3>
                             <p>{current_time}</p>
