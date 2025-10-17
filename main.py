@@ -17,7 +17,6 @@ from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
 from execution_engine.okx_trader import OKXTrader
 from utils.email_notifier import EmailNotifier
 from market_scanner import scan_for_opportunities # 导入市场扫描器
-from utils.auto_updater import AutoUpdater, graceful_restart
 
 def save_decision_report(report: Dict[str, Any]):
     """将决策报告保存到文件。"""
@@ -43,7 +42,7 @@ def print_decision_report(report: Dict[str, Any]):
     color = color_map.get(decision, "\033[0m") # 默认无颜色
     print(f"\033[38;5;109m  - 最终决策: {color}{decision}\033[0m")
         
-    # 置信度字段已移除
+    print(f"\033[38;5;109m  - 置信度: {report.get('confidence', 'N/A')}\033[0m")
     trade_params = report.get('trade_params')
     if trade_params:
         print("\033[38;5;109m  - 交易参数:\033[0m")
@@ -391,23 +390,6 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     trader.execute_decision(final_decision)
                 
                 track_process('trade_execution', execute_trade)
-                # 注入持仓盈亏快照（若存在）
-                try:
-                    pos_info = trader.get_position(symbol)
-                    if pos_info:
-                        # 统一处理net/long/short
-                        pos_side = pos_info.get('posSide')
-                        pos_amount = float(pos_info.get('pos', 0) or 0)
-                        avg_px = float(pos_info.get('avgPx', 0) or 0)
-                        upl = pos_info.get('upl')
-                        upl_usd = float(upl) if upl is not None else (0.0 if avg_px == 0 else (float(trader.exchange.fetch_ticker(symbol)['last']) - avg_px) * pos_amount)
-                        side_desc = '多仓' if (pos_side == 'long' or (pos_side == 'net' and pos_amount > 0)) else ('空仓' if (pos_side == 'short' or (pos_side == 'net' and pos_amount < 0)) else '无仓')
-                        final_decision['position_snapshot'] = {
-                            'pnl_usd': upl_usd,
-                            'desc': f"{side_desc} | 数量: {pos_amount} | 开仓均价: ${avg_px}"
-                        }
-                except Exception:
-                    pass
                 email_notifier.send_decision_notification(final_decision, execution_success=True, process_status=process_status)
             except Exception as e:
                 error_msg = f"交易执行失败: {str(e)}"
@@ -418,6 +400,7 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     error_msg, 
                     context={
                         "decision": final_decision.get("decision"),
+                        "confidence": final_decision.get("confidence"),
                         "trade_params": str(final_decision.get("trade_params"))
                     }
                 )
@@ -525,15 +508,6 @@ def main():
     print("\033[38;5;102m" + "──────────────────────────────────────────────────────────────────────────────" + "\033[0m")  # 莫兰迪灰绿色
 
     job = partial(run_trading_cycle, skip_llm=args.skip_llm)
-
-    # ====== 启动自动更新后台线程（可选） ======
-    def _on_code_updated():
-        # 发现更新后，优雅重启当前进程
-        graceful_restart()
-    try:
-        AutoUpdater(on_updated=_on_code_updated).start()
-    except Exception as e:
-        LOGGER.warning(f"AutoUpdater 启动失败: {e}")
 
     if args.now:
         print("\033[38;5;143m[启动] 接收到 --now 参数，立即执行一次决策周期...\033[0m")  # 莫兰迪暖灰色
