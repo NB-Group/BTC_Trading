@@ -53,6 +53,13 @@ AUTO_UPDATE = {
     'protect_local_changes': os.getenv('AUTO_UPDATE_PROTECT_LOCAL', 'true').lower() == 'true',
 }
 
+# ----------------- 开机自启动 -----------------
+AUTO_START = {
+    'enabled': os.getenv('AUTO_START_ENABLED', 'true').lower() == 'true',  # 默认开启
+    'task_name': os.getenv('AUTO_START_TASK_NAME', 'BTC_Trading_AutoStart'),
+    'args': os.getenv('AUTO_START_ARGS', ''),  # 例如 "--now"
+}
+
 # ==============================================================================
 # 社交媒体与情报分析 (Social Media & Intelligence)
 # ==============================================================================

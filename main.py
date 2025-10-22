@@ -17,6 +17,7 @@ from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
 from execution_engine.okx_trader import OKXTrader
 from utils.email_notifier import EmailNotifier
 from market_scanner import scan_for_opportunities # 导入市场扫描器
+from utils.autostart import ensure_windows_autostart
 
 def save_decision_report(report: Dict[str, Any]):
     """将决策报告保存到文件。"""
@@ -42,7 +43,7 @@ def print_decision_report(report: Dict[str, Any]):
     color = color_map.get(decision, "\033[0m") # 默认无颜色
     print(f"\033[38;5;109m  - 最终决策: {color}{decision}\033[0m")
         
-    print(f"\033[38;5;109m  - 置信度: {report.get('confidence', 'N/A')}\033[0m")
+    # 置信度字段已移除
     trade_params = report.get('trade_params')
     if trade_params:
         print("\033[38;5;109m  - 交易参数:\033[0m")
@@ -508,6 +509,12 @@ def main():
     print("\033[38;5;102m" + "──────────────────────────────────────────────────────────────────────────────" + "\033[0m")  # 莫兰迪灰绿色
 
     job = partial(run_trading_cycle, skip_llm=args.skip_llm)
+
+    # ====== Windows 开机自启动（可选，默认开启，可通过 .env 控制） ======
+    try:
+        ensure_windows_autostart()
+    except Exception as e:
+        LOGGER.warning(f"AutoStart 注册失败: {e}")
 
     if args.now:
         print("\033[38;5;143m[启动] 接收到 --now 参数，立即执行一次决策周期...\033[0m")  # 莫兰迪暖灰色
