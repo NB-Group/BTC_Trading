@@ -30,9 +30,16 @@ def ensure_windows_autostart():
     project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
     main_py = os.path.join(project_dir, 'main.py')
     extra_args = config.AUTO_START.get('args', '')
+    conda_env = config.AUTO_START.get('conda_env')
 
-    # 构造命令行：python main.py <args>
-    cmd_line = f"{_quote(python_exe)} {_quote(main_py)} {extra_args}".strip()
+    # 优先使用Conda环境
+    conda_exe = os.environ.get('CONDA_EXE')
+    if conda_env and conda_exe and os.path.exists(conda_exe):
+        LOGGER.info(f"检测到Conda环境，将使用 'conda run -n {conda_env}' 来构造自启动命令。")
+        cmd_line = f'{_quote(conda_exe)} run -n {conda_env} python {_quote(main_py)} {extra_args}'.strip()
+    else:
+        # 降级为直接使用Python解释器
+        cmd_line = f"{_quote(python_exe)} {_quote(main_py)} {extra_args}".strip()
 
     # schtasks /Create
     create_cmd = [

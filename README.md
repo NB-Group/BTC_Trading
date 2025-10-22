@@ -122,6 +122,7 @@ set AUTO_UPDATE_BRANCH=main
 set AUTO_START_ENABLED=true
 set AUTO_START_TASK_NAME=BTC_Trading_AutoStart
 set AUTO_START_ARGS=--now
+set AUTO_START_CONDA_ENV=k-line
 ```
 
 说明：
