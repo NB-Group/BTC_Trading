@@ -8,7 +8,8 @@ def _quote(arg: str) -> str:
     if not arg:
         return ""
     if ' ' in arg or '"' in arg:
-        return f'"{arg.replace("\"", r'\"')}"'
+        escaped = arg.replace('"', r'\"')
+        return f'"{escaped}"'
     return arg
 
 
