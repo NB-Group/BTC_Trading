@@ -58,6 +58,7 @@ AUTO_START = {
     'enabled': os.getenv('AUTO_START_ENABLED', 'true').lower() == 'true',  # 默认开启
     'task_name': os.getenv('AUTO_START_TASK_NAME', 'BTC_Trading_AutoStart'),
     'args': os.getenv('AUTO_START_ARGS', ''),  # 例如 "--now"
+    'conda_env': os.getenv('AUTO_START_CONDA_ENV', 'k-line'), # 指定要在此Conda环境中运行
 }
 
 # ==============================================================================
