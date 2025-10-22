@@ -114,6 +114,21 @@ set AUTO_UPDATE_BRANCH=main
 
 注意：该机制会执行硬重置 `git reset --hard origin/<branch>`，请勿在运行目录保留未提交的本地修改。
 
+### Windows 开机自启动（默认开启）
+
+程序在 Windows 上会自动尝试注册计划任务（开机登录即启动）。可通过 `.env` 控制：
+
+```bash
+set AUTO_START_ENABLED=true
+set AUTO_START_TASK_NAME=BTC_Trading_AutoStart
+set AUTO_START_ARGS=--now
+```
+
+说明：
+- 使用 `schtasks` 创建登录触发的计划任务，最高权限运行。
+- 程序路径使用当前 Python 解释器与项目 `main.py`。
+- 如需禁用，自行设置 `AUTO_START_ENABLED=false`。
+
 ### 启动仪表板
 ```bash
 streamlit run dashboard.py    
