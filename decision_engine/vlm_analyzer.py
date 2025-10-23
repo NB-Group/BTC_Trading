@@ -47,8 +47,8 @@ class VLMAnalyzer:
         self.api_key = deepseek_config.get('api_key')
         
         # 为不同任务定义不同的模型
-        self.kline_model = "zai-org/GLM-4.5V"  # K线图分析模型
-        self.tweet_model = "zai-org/GLM-4.5V"  # 推文图片分析也使用新模型
+        self.kline_model = "Qwen3-VL-235B-A22B-Thinking"  # K线图分析模型
+        self.tweet_model = "Qwen3-VL-235B-A22B-Thinking"  # 推文图片分析也使用新模型
         
         if not self.api_key or 'YOUR' in self.api_key:
             LOGGER.warning("VLM (DeepSeek) API key 未配置，VLM分析功能将被跳过。")
@@ -69,6 +69,13 @@ class VLMAnalyzer:
         # 显示缓存统计
         stats = self.cache.get_cache_stats()
         LOGGER.info(f"VLM缓存统计: 推文缓存 {stats['tweet_cache_count']} 条, K线图缓存 {stats['kline_cache_count']} 条")
+        # 打印 VLM 单源模式开关日志
+        try:
+            rules = getattr(config, 'DECISION_RULES', {})
+            vlm_solo = rules.get('vlm_solo_trade', True)
+            LOGGER.info(f"VLM 单源模式: {'启用' if vlm_solo else '禁用'}")
+        except Exception:
+            pass
 
     def _download_media(self, url: str) -> Optional[Dict[str, Any]]:
         """下载媒体文件并返回字节和MIME类型。"""
@@ -317,6 +324,13 @@ class VLMAnalyzer:
     3) 更高周期趋势未呈现明确多头，或多头关键位失守；
     4) 形态上有明确的反转/延续空头形态并得到成交量确认。
 *   **顺大级别而行**: 如更高周期呈现显著多头结构，避免因短期回撤得出看跌结论，除非满足“做空门槛”。
+
+**弱反弹陷阱识别（必须执行）:**
+* 若处于明显下跌后的首次弱反弹阶段，且满足以下至少两项，则将“做多”建议降级为“观望”或“仅小仓位试探”，并在理由中标注“弱反弹陷阱风险”:
+  1) 上涨过程中成交量未放大，或量能背离；
+  2) 价格仅略高于短期均线（如MA5/MA10），但未站稳MA20/布林中轨；
+  3) RSI处于高位但无明确底背离信号；
+  4) 上方存在近端密集阻力，且最近高点未有效突破（收盘确认）。
 
 **你的分析任务:**
 1.  **当前趋势与动能**:

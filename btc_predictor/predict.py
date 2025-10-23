@@ -1,5 +1,6 @@
 import pandas as pd
 import numpy as np
+import os
 import torch
 import logging
 from typing import Optional, Dict, Any
@@ -8,6 +9,8 @@ from datetime import datetime, timezone
 from .utils import LOGGER, setup_logger, load_model_artifacts, DEVICE
 from .config import get_model_config
 from .features import create_features
+import pandas as pd
+import numpy as np
 
 def predict_for_event(model: torch.nn.Module, scaler_X, feature_names: list, event_data: pd.DataFrame) -> Optional[float]:
     """
@@ -94,6 +97,43 @@ def get_all_predictions(model_name: str, price_data: pd.DataFrame) -> Optional[p
         LOGGER.error(f"批量生成预测时发生严重错误: {e}")
         return None
 
+def _detect_recent_ma_cross(close_series: pd.Series, ma_series: pd.Series, lookback_bars: int = 24, eps_pct: float = 0.001) -> Optional[str]:
+    """在最近 lookback_bars 根K线内检测是否发生过 MA 金叉/死叉。
+    返回 'BUY' / 'SELL' / None。
+    规则：
+    - 使用符号翻转法，贴线(差值=0)继承前一符号，避免漏检。
+    - 只返回最近一次交叉对应方向；若当前价格不在对应侧，则返回None（过滤反向回盘）。
+    """
+    df = pd.DataFrame({'close': close_series, 'ma': ma_series}).dropna()
+    if df.empty or len(df) < 3:
+        return None
+    diff = (df['close'] - df['ma']).astype('float64')
+    # 使用相对阈值平滑“贴线”抖动（默认 0.1%）
+    eps = (df['close'] * float(max(eps_pct, 0.0))).astype('float64')
+    sign = np.where(diff > eps, 1.0, np.where(diff < -eps, -1.0, 0.0))
+    for i in range(1, len(sign)):
+        if sign[i] == 0:
+            sign[i] = sign[i-1]
+    changes = (sign[1:] * sign[:-1]) < 0
+    pos = np.where(changes)[0] + 1
+    if pos.size == 0:
+        return None
+    recent_idx = pos[-1]
+    # 限制在最近 lookback_bars 内
+    if (len(df) - 1 - recent_idx) > max(lookback_bars, 1):
+        return None
+    # 当前是否仍在对应侧，或仍处于贴线带内（视为延续最近一次交叉方向）
+    last_diff = diff.iloc[-1]
+    last_eps = eps.iloc[-1]
+    crossed_buy = (sign[recent_idx-1] < 0 and sign[recent_idx] > 0)
+    crossed_sell = (sign[recent_idx-1] > 0 and sign[recent_idx] < 0)
+    if crossed_buy and (last_diff > last_eps or abs(last_diff) <= last_eps):
+        return 'BUY'
+    if crossed_sell and (last_diff < -last_eps or abs(last_diff) <= last_eps):
+        return 'SELL'
+    return None
+
+
 def get_live_trade_signal(model_name: str, symbol: str) -> Optional[Dict[str, Any]]:
     """
     获取最新的实时交易信号。
@@ -105,10 +145,7 @@ def get_live_trade_signal(model_name: str, symbol: str) -> Optional[Dict[str, An
     LOGGER.info(f"正在为模型 '{model_name}' 获取 {symbol} 的实时交易信号...")
     
     try:
-        # 1. 加载模型
-        artifacts = load_model_artifacts(model_name)
-        model = artifacts['model']
-        scaler_X = artifacts['scaler_X']
+        # 1. 读取模型配置（不加载模型，延迟到有信号时再加载）
         model_config = get_model_config(model_name)
         feature_names = model_config.get('features', [])
         ma_window = model_config.get('ma_window', 60)
@@ -127,40 +164,35 @@ def get_live_trade_signal(model_name: str, symbol: str) -> Optional[Dict[str, An
         features_df = create_features(price_data.copy(), model_name)
         features_df[f'ma{ma_window}'] = features_df['close'].rolling(window=ma_window).mean()
         
-        # 获取最新的两个数据点以探测交叉
-        latest = features_df.iloc[-1]
-        previous = features_df.iloc[-2]
-
-        # 4. 探测交叉信号
-        signal = "HOLD"
-        is_golden_cross = previous['close'] < previous[f'ma{ma_window}'] and latest['close'] > latest[f'ma{ma_window}']
-        is_death_cross = previous['close'] > previous[f'ma{ma_window}'] and latest['close'] < latest[f'ma{ma_window}']
-
-        if is_golden_cross:
-            signal = "BUY"
-        elif is_death_cross:
-            signal = "SELL"
+        # 4. 探测交叉信号（改为“近N根内最近一次交叉且当前仍在对应侧”）
+        lookback_bars = int(os.environ.get('MA_CROSS_LOOKBACK', '24'))
+        eps_pct = float(os.environ.get('MA_CROSS_EPS_PCT', '0.001'))
+        recent_signal = _detect_recent_ma_cross(features_df['close'], features_df[f'ma{ma_window}'], lookback_bars, eps_pct)
+        signal = recent_signal or "HOLD"
             
-        # 5. 如果有信号，则获取模型预测
+        # 5. 如果有信号，则尝试加载模型并获取预测（加载失败则仅输出技术信号）
         prediction = 0.0
         if signal != "HOLD":
-            event_data = features_df.iloc[[-1]] # 获取最后一行的DataFrame
-            prediction = predict_for_event(
-                model=model,
-                scaler_X=scaler_X,
-                feature_names=feature_names,
-                event_data=event_data
-            )
-            if prediction is None:
-                LOGGER.error("模型预测失败，信号被忽略。")
-                signal = "HOLD" # 预测失败则不交易
+            try:
+                artifacts = load_model_artifacts(model_name)
+                model = artifacts['model']
+                scaler_X = artifacts['scaler_X']
+                event_data = features_df.iloc[[-1]] # 获取最后一行的DataFrame
+                prediction = predict_for_event(
+                    model=model,
+                    scaler_X=scaler_X,
+                    feature_names=feature_names,
+                    event_data=event_data
+                ) or 0.0
+            except Exception as e:
+                LOGGER.warning(f"模型未加载/预测失败，已退化为纯技术信号: {e}")
                 prediction = 0.0
 
         result = {
             "signal": signal,
             "predicted_return": prediction,
-            "timestamp": latest.name.isoformat(),
-            "current_price": latest['close'],
+            "timestamp": features_df.index[-1].isoformat(),
+            "current_price": features_df['close'].iloc[-1],
             "strategy": f"ML_MA{ma_window}_Crossover", # 增加策略标识
             "info": "信号处理成功。" # 明确的成功信息
         }

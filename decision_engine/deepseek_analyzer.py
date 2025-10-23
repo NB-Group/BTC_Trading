@@ -29,6 +29,16 @@ class DeepSeekAnalyzer:
 
         self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
 
+        # 初始化日志：打印“仅VLM模式”与关键决策参数
+        try:
+            rules = getattr(config, 'DECISION_RULES', {})
+            vlm_solo = rules.get('vlm_solo_trade', True)
+            probe_ratio = rules.get('probe_position_ratio', 0.3)
+            strict_long = rules.get('strict_long_trigger', True)
+            LOGGER.info(f"DeepSeekAnalyzer 初始化: VLM单源模式={'启用' if vlm_solo else '禁用'}, 试探仓比例={probe_ratio:.2f}, 严格做多触发={'是' if strict_long else '否'}")
+        except Exception:
+            pass
+
     def _parse_llm_json_response(self, response_text: str) -> Dict[str, Any]:
         """
         健壮的JSON解析函数，处理LLM返回的各种格式问题。
@@ -324,8 +334,7 @@ class DeepSeekAnalyzer:
     *   **默认中性**: 在证据不足或信号冲突时，首选 `HOLD`，避免勉强进场。
     *   **震荡行情处理**: 当VLM分析识别出市场处于横盘震荡（例如布林带收窄，价格在区间内波动）时，主要策略应为 `HOLD`，耐心等待明确的突破信号，避免在区间内被反复止损。
     *   **做多优先**: 当出现多头排列、关键支撑位反弹或放量突破等看涨共振信号时，优先考虑 **LONG**；不要因为局部回撤而轻易做空。
-    *   **陷阱识别 (Trap Detection)**:
-        *   **弱反弹陷阱 (Weak Bounce Trap)**: 若看涨信号出现在一段明显下跌后的首次弱反弹（K线实体小、量能不足、仅略高于短均线），优先 `HOLD` 并在`reasoning`说明“观察反弹有效性，警惕多头陷阱”。
+    *   **陷阱识别 (Trap Detection)**: 由 VLM 技术分析负责识别弱反弹/多头陷阱；若VLM提示“弱反弹/量能不足”，可降低仓位或等待确认。
     *   **空头门槛（更高要求）**: 仅当以下至少两项同时满足时，才可考虑 `SHORT`：
         1) 1H 级别结论明确看跌且关键位被有效跌破；
         2) 内部量化模型矩阵中至少一个模型为 `SELL` 或出现强烈空头动量；
@@ -357,11 +366,13 @@ class DeepSeekAnalyzer:
   - **止盈**: 当VLM分析或关键新闻表明短期趋势可能反转，且当前有盈利时，应果断平仓。
   - **止损**: 当价格触及预设的止损点，或出现强烈的反向关键信号时，必须平仓。
   - **持有逻辑**: 如果持有仓位与短期趋势方向一致，即使有小幅回调，也应继续持有，以捕捉更大的波动。
+  - **重要澄清**: 若“内部量化模型矩阵”的信号为 `HOLD` 且当前为“无持仓”，这表示“没有入场信号（保持空仓）”，而不是“继续持有已有仓位”。严禁将“无入场信号”解读为“维持仓位”。
 
 # 信息解读
 - **内部量化模型矩阵**: 多策略共振提升置信度；冲突→`HOLD` 或减弱杠杆。
 - **VLM K线分析 (1H)**: 唯一技术图形来源；用于趋势、结构、关键位、动量与潜在入/出场窗口。
     - **操作建议解释**: 若 1H 图给出“做多”且条件为“价格高于X”，需验证当前价是否已满足；否则应 `HOLD` 并等待。
+    - **HOLD 语义**: 若当前无持仓，`HOLD` 表示空仓观望；若当前有持仓，`HOLD` 表示不加减仓但保留止盈止损计划。
 
 # 当前市场状态与持仓记忆
 - **分析时间**: {current_time_utc}
@@ -413,7 +424,11 @@ class DeepSeekAnalyzer:
             current_price = signal_data.get('current_price')
 
             quant_part += f"\n#### 策略: {strategy}\n"
-            quant_part += f"- **信号类型**: **{signal_type}**\n"
+            # 对 HOLD 进行更明确的语义说明，避免与“继续持有”混淆
+            if str(signal_type).upper() == 'HOLD':
+                quant_part += f"- **信号类型**: **{signal_type}** （无入场信号：若当前无持仓则保持空仓；若已有持仓则维持不加不减）\n"
+            else:
+                quant_part += f"- **信号类型**: **{signal_type}**\n"
             quant_part += f"- **策略分析**: {info}\n"
             if current_price:
                 quant_part += f"- **参考价格**: ${current_price:.2f}\n"
