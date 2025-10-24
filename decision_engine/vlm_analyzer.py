@@ -47,8 +47,8 @@ class VLMAnalyzer:
         self.api_key = deepseek_config.get('api_key')
         
         # 为不同任务定义不同的模型
-        self.kline_model = "Qwen3-VL-235B-A22B-Thinking"  # K线图分析模型
-        self.tweet_model = "Qwen3-VL-235B-A22B-Thinking"  # 推文图片分析也使用新模型
+        self.kline_model = "Qwen/Qwen3-VL-235B-A22B-Thinking"  # K线图分析模型
+        self.tweet_model = "Qwen/Qwen3-VL-235B-A22B-Thinking"  # 推文图片分析也使用新模型
         
         if not self.api_key or 'YOUR' in self.api_key:
             LOGGER.warning("VLM (DeepSeek) API key 未配置，VLM分析功能将被跳过。")
