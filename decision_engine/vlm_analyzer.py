@@ -46,6 +46,13 @@ class VLMAnalyzer:
         self.api_url = (deepseek_config.get('base_url') or "https://api.deepseek.com/v1").rstrip('/') + "/chat/completions"
         self.api_key = deepseek_config.get('api_key')
         
+        # 超时设置（秒）
+        self.request_timeout_seconds = 300  # VLM请求超时，默认5分钟
+        self.download_timeout_seconds = 60   # 媒体下载超时，默认60秒
+        
+        # 是否启用流式输出（SSE），默认关闭。开启后将边到边打印到控制台
+        self.stream: bool = True
+        
         # 为不同任务定义不同的模型
         self.kline_model = "Qwen/Qwen3-VL-235B-A22B-Thinking"  # K线图分析模型
         self.tweet_model = "Qwen/Qwen3-VL-235B-A22B-Thinking"  # 推文图片分析也使用新模型
@@ -83,7 +90,7 @@ class VLMAnalyzer:
             return None
         try:
             LOGGER.info(f"正在下载媒体文件: {url}")
-            response = self.session.get(url, timeout=20, stream=True)
+            response = self.session.get(url, timeout=self.download_timeout_seconds, stream=True)
             response.raise_for_status()
             
             content_type = response.headers.get('Content-Type') or mimetypes.guess_type(url)[0]
@@ -108,11 +115,19 @@ class VLMAnalyzer:
             "model": model_name,  # 使用传入的模型名称
             "messages": [{"role": "user", "content": [
                 {"type": "text", "text": prompt_text},
-                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_media}"}}
+                {"type": "image_url", "image_url": {"url": f"data:{mime_type};base64,{base64_media}", "detail": "high"}}
             ]}],
-            "max_tokens": 2000, # 为K线图分析增加token上限
+            "max_tokens": 4096, # 提高最大生成长度，减少过早截断
             "temperature": 0.2 # 降低温度，减少幻觉和乱码
         }
+        
+        # 流式输出开关（兼容OpenAI/DeepSeek风格），若为True则返回SSE
+        if self.stream:
+            payload["stream"] = True
+            # SSE常用头
+            headers["Accept"] = "text/event-stream"
+            headers["Cache-Control"] = "no-cache"
+            headers["Connection"] = "keep-alive"
 
         # --- 代理设置处理 ---
         # 记录原始代理设置
@@ -127,23 +142,90 @@ class VLMAnalyzer:
             if key in os.environ:
                 del os.environ[key]
         self.session.proxies = {}
+        # 关闭从环境继承（如代理）
+        orig_trust_env = getattr(self.session, 'trust_env', True)
+        self.session.trust_env = False
 
         try:
             LOGGER.info(f"正在使用模型 {model_name} 进行VLM分析...")
             LOGGER.debug(f"VLM API URL: {self.api_url}")
             LOGGER.debug(f"Payload size: {len(json.dumps(payload))} chars")
             
-            response = self.post_with_retry(self.api_url, headers=headers, json=payload, timeout=120)
-            
-            LOGGER.info(f"VLM API响应状态码: {response.status_code}")
-            
-            response.raise_for_status()
-            
-            result = response.json()
-            analysis = result['choices'][0]['message']['content'].strip()
-            LOGGER.success(f"VLM分析成功接收（模型: {model_name}）。")
-            LOGGER.info(f"VLM模型输出: {analysis}")
-            return analysis
+            # 非流式/流式分别处理
+            if not self.stream:
+                response = self.post_with_retry(self.api_url, headers=headers, json=payload, timeout=self.request_timeout_seconds, stream_response=False)
+                LOGGER.info(f"VLM API响应状态码: {response.status_code}")
+                response.raise_for_status()
+                result = response.json()
+                analysis = result['choices'][0]['message']['content'].strip()
+                LOGGER.success(f"VLM分析成功接收（模型: {model_name}）。")
+                LOGGER.info(f"VLM模型输出: {analysis}")
+                return analysis
+            else:
+                # 流式：边接收边打印，最终拼接完整文本返回
+                # 取消读取超时：当模型持续生成时允许无限时长
+                response = self.post_with_retry(self.api_url, headers=headers, json=payload, timeout=None, stream_response=True)
+                LOGGER.info(f"VLM API流式响应状态码: {response.status_code}")
+                response.raise_for_status()
+                # 强制按UTF-8解析SSE，避免在Windows下出现乱码
+                advertised_encoding = getattr(response, 'encoding', None)
+                if advertised_encoding and advertised_encoding.lower() != 'utf-8':
+                    LOGGER.debug(f"服务端宣称编码为: {advertised_encoding}，将强制使用UTF-8解析SSE。")
+                response.encoding = 'utf-8'
+                final_text_chunks = []
+                # 有些模型（如 Thinking 系列）会把主体内容放在 reasoning_content
+                final_reasoning_chunks = []
+                print("[VLM Streaming] ", end="", flush=True)
+                for line_bytes in response.iter_lines(decode_unicode=False):
+                    if not line_bytes:  # 心跳/空行
+                        continue
+                    # 显式使用UTF-8解码
+                    try:
+                        line = line_bytes.decode('utf-8', errors='ignore')
+                    except Exception:
+                        # 兜底：按ISO-8859-1避免异常
+                        line = line_bytes.decode('latin-1', errors='ignore')
+                    if line.startswith('data:'):
+                        data_str = line[len('data:'):].strip()
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            evt = json.loads(data_str)
+                            # 兼容多种流式字段：choices[].delta.content 或 choices[].message.content
+                            content_delta = None
+                            reasoning_delta = None
+                            choices = evt.get('choices') or []
+                            if choices:
+                                choice0 = choices[0]
+                                delta = choice0.get('delta') or {}
+                                content_delta = delta.get('content')
+                                reasoning_delta = delta.get('reasoning_content')
+                                if content_delta is None:
+                                    # 一些实现直接用message
+                                    message = choice0.get('message') or {}
+                                    content_delta = message.get('content')
+                            if content_delta:
+                                print(content_delta, end="", flush=True)
+                                final_text_chunks.append(content_delta)
+                            if reasoning_delta:
+                                # 不混印推理内容到终端以免干扰，可按需打印；此处一并输出帮助检查是否只有推理段
+                                print(reasoning_delta, end="", flush=True)
+                                final_reasoning_chunks.append(reasoning_delta)
+                        except Exception as parse_err:
+                            LOGGER.debug(f"SSE行解析失败，忽略: {parse_err}; 行: {line[:200]}")
+                print()  # 换行
+                final_text = ''.join(final_text_chunks).strip()
+                # 若可见内容极少，尝试使用 reasoning_content 作为回退
+                if len(final_text) < 5:
+                    alt = ''.join(final_reasoning_chunks).strip()
+                    if alt:
+                        final_text = alt
+                if final_text:
+                    LOGGER.success(f"VLM流式分析完成（模型: {model_name}）。")
+                    return final_text
+                else:
+                    LOGGER.warning("VLM流式无内容返回，可能被中断。")
+                    return "VLM流式响应无内容。"
         except requests.exceptions.RequestException as e:
             LOGGER.error(f"VLM API请求失败: {e}")
             
@@ -194,9 +276,14 @@ class VLMAnalyzer:
                 os.environ['HTTPS_PROXY'] = orig_HTTPS_PROXY
             if orig_session_proxies is not None:
                 self.session.proxies = orig_session_proxies
+            # 恢复trust_env
+            try:
+                self.session.trust_env = orig_trust_env
+            except Exception:
+                pass
 
     @retry(stop=stop_after_attempt(5), wait=wait_exponential(multiplier=2, min=4, max=15))
-    def post_with_retry(self, url, headers, json, timeout):
+    def post_with_retry(self, url, headers, json, timeout, stream_response: bool = False):
         # 每次重试前都彻底清理代理设置
         import os
         for key in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
@@ -205,12 +292,25 @@ class VLMAnalyzer:
         
         # 确保session代理也清空
         self.session.proxies = {}
+        # 同时关闭环境继承，避免代理再次被读取
+        orig_trust_env = getattr(self.session, 'trust_env', True)
+        self.session.trust_env = False
         
         # 增加间隔避免频繁请求
         import time
         time.sleep(2)
         
-        return self.session.post(url, headers=headers, json=json, timeout=timeout)
+        # timeout 可以是单值或 (连接超时, 读取超时)，这里统一设置为 (30秒连接, 剩余读取)
+        if isinstance(timeout, (int, float)):
+            timeout = (30, timeout)
+        try:
+            return self.session.post(url, headers=headers, json=json, timeout=timeout, stream=stream_response)
+        finally:
+            # 恢复trust_env
+            try:
+                self.session.trust_env = orig_trust_env
+            except Exception:
+                pass
 
     def analyze_media(self, media_url: str, tweet_text: str, is_video: bool = False) -> Optional[str]:
         """分析来自推文的在线媒体（图片/视频），使用7B模型，支持缓存。"""
