@@ -49,6 +49,9 @@ class VLMAnalyzer:
         # 超时设置（秒）
         self.request_timeout_seconds = 300  # VLM请求超时，默认5分钟
         self.download_timeout_seconds = 60   # 媒体下载超时，默认60秒
+        # 连接与流式读取超时（更细粒度控制）
+        self.request_connect_timeout_seconds = 30  # 连接超时
+        self.stream_read_timeout_seconds = 120     # 流式读取超时：无数据超过此值即超时
         
         # 是否启用流式输出（SSE），默认关闭。开启后将边到边打印到控制台
         self.stream: bool = True
@@ -153,7 +156,14 @@ class VLMAnalyzer:
             
             # 非流式/流式分别处理
             if not self.stream:
-                response = self.post_with_retry(self.api_url, headers=headers, json=payload, timeout=self.request_timeout_seconds, stream_response=False)
+                # 使用(连接超时, 读取超时)的形式，避免整体阻塞
+                response = self.post_with_retry(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=(self.request_connect_timeout_seconds, self.request_timeout_seconds),
+                    stream_response=False,
+                )
                 LOGGER.info(f"VLM API响应状态码: {response.status_code}")
                 response.raise_for_status()
                 result = response.json()
@@ -163,8 +173,14 @@ class VLMAnalyzer:
                 return analysis
             else:
                 # 流式：边接收边打印，最终拼接完整文本返回
-                # 取消读取超时：当模型持续生成时允许无限时长
-                response = self.post_with_retry(self.api_url, headers=headers, json=payload, timeout=None, stream_response=True)
+                # 流式：设置有限读取超时，若超过该时间未收到任何数据则中断
+                response = self.post_with_retry(
+                    self.api_url,
+                    headers=headers,
+                    json=payload,
+                    timeout=(self.request_connect_timeout_seconds, self.stream_read_timeout_seconds),
+                    stream_response=True,
+                )
                 LOGGER.info(f"VLM API流式响应状态码: {response.status_code}")
                 response.raise_for_status()
                 # 强制按UTF-8解析SSE，避免在Windows下出现乱码
