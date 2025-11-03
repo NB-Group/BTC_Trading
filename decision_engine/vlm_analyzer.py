@@ -52,13 +52,16 @@ class VLMAnalyzer:
         # 连接与流式读取超时（更细粒度控制）
         self.request_connect_timeout_seconds = 30  # 连接超时
         self.stream_read_timeout_seconds = 120     # 流式读取超时：无数据超过此值即超时
+        # 流式重试与首字超时
+        self.stream_max_retries = 3               # 流式整体重试次数（首字/中途卡住都会重试）
+        self.first_token_timeout_seconds = 60     # 首字/中途最长等待时间（单次流式读），超过则重试
         
         # 是否启用流式输出（SSE），默认关闭。开启后将边到边打印到控制台
         self.stream: bool = True
         
         # 为不同任务定义不同的模型
-        self.kline_model = "Qwen/Qwen3-VL-235B-A22B-Thinking"  # K线图分析模型
-        self.tweet_model = "Qwen/Qwen3-VL-235B-A22B-Thinking"  # 推文图片分析也使用新模型
+        self.kline_model = "stepfun-ai/step3"  # K线图分析模型
+        self.tweet_model = "stepfun-ai/step3"  # 推文图片分析模型
         
         if not self.api_key or 'YOUR' in self.api_key:
             LOGGER.warning("VLM (DeepSeek) API key 未配置，VLM分析功能将被跳过。")
@@ -172,76 +175,139 @@ class VLMAnalyzer:
                 LOGGER.info(f"VLM模型输出: {analysis}")
                 return analysis
             else:
-                # 流式：边接收边打印，最终拼接完整文本返回
-                # 流式：设置有限读取超时，若超过该时间未收到任何数据则中断
-                response = self.post_with_retry(
-                    self.api_url,
-                    headers=headers,
-                    json=payload,
-                    timeout=(self.request_connect_timeout_seconds, self.stream_read_timeout_seconds),
-                    stream_response=True,
-                )
-                LOGGER.info(f"VLM API流式响应状态码: {response.status_code}")
-                response.raise_for_status()
-                # 强制按UTF-8解析SSE，避免在Windows下出现乱码
-                advertised_encoding = getattr(response, 'encoding', None)
-                if advertised_encoding and advertised_encoding.lower() != 'utf-8':
-                    LOGGER.debug(f"服务端宣称编码为: {advertised_encoding}，将强制使用UTF-8解析SSE。")
-                response.encoding = 'utf-8'
-                final_text_chunks = []
-                # 有些模型（如 Thinking 系列）会把主体内容放在 reasoning_content
-                final_reasoning_chunks = []
-                print("[VLM Streaming] ", end="", flush=True)
-                for line_bytes in response.iter_lines(decode_unicode=False):
-                    if not line_bytes:  # 心跳/空行
-                        continue
-                    # 显式使用UTF-8解码
+                # 流式：边接收边打印；加入首字和中途卡顿的自动重试
+                for attempt_idx in range(1, self.stream_max_retries + 1):
+                    got_any_token = False
                     try:
-                        line = line_bytes.decode('utf-8', errors='ignore')
-                    except Exception:
-                        # 兜底：按ISO-8859-1避免异常
-                        line = line_bytes.decode('latin-1', errors='ignore')
-                    if line.startswith('data:'):
-                        data_str = line[len('data:'):].strip()
-                        if data_str == "[DONE]":
-                            break
-                        try:
-                            evt = json.loads(data_str)
-                            # 兼容多种流式字段：choices[].delta.content 或 choices[].message.content
-                            content_delta = None
-                            reasoning_delta = None
-                            choices = evt.get('choices') or []
-                            if choices:
-                                choice0 = choices[0]
-                                delta = choice0.get('delta') or {}
-                                content_delta = delta.get('content')
-                                reasoning_delta = delta.get('reasoning_content')
-                                if content_delta is None:
-                                    # 一些实现直接用message
-                                    message = choice0.get('message') or {}
-                                    content_delta = message.get('content')
-                            if content_delta:
-                                print(content_delta, end="", flush=True)
-                                final_text_chunks.append(content_delta)
-                            if reasoning_delta:
-                                # 不混印推理内容到终端以免干扰，可按需打印；此处一并输出帮助检查是否只有推理段
-                                print(reasoning_delta, end="", flush=True)
-                                final_reasoning_chunks.append(reasoning_delta)
-                        except Exception as parse_err:
-                            LOGGER.debug(f"SSE行解析失败，忽略: {parse_err}; 行: {line[:200]}")
-                print()  # 换行
-                final_text = ''.join(final_text_chunks).strip()
-                # 若可见内容极少，尝试使用 reasoning_content 作为回退
-                if len(final_text) < 5:
-                    alt = ''.join(final_reasoning_chunks).strip()
-                    if alt:
-                        final_text = alt
-                if final_text:
-                    LOGGER.success(f"VLM流式分析完成（模型: {model_name}）。")
-                    return final_text
-                else:
-                    LOGGER.warning("VLM流式无内容返回，可能被中断。")
-                    return "VLM流式响应无内容。"
+                        # 统一用较短的读取超时保障首字与中途卡顿都能尽快超时重试
+                        response = self.post_with_retry(
+                            self.api_url,
+                            headers=headers,
+                            json=payload,
+                            timeout=(self.request_connect_timeout_seconds, self.first_token_timeout_seconds),
+                            stream_response=True,
+                        )
+                        LOGGER.info(f"[try {attempt_idx}/{self.stream_max_retries}] VLM API流式响应状态码: {response.status_code}")
+                        response.raise_for_status()
+                        # 强制按UTF-8解析SSE，避免在Windows下出现乱码
+                        advertised_encoding = getattr(response, 'encoding', None)
+                        if advertised_encoding and advertised_encoding.lower() != 'utf-8':
+                            LOGGER.debug(f"服务端宣称编码为: {advertised_encoding}，将强制使用UTF-8解析SSE。")
+                        response.encoding = 'utf-8'
+
+                        # 记录进度
+                        import time
+                        start_time = time.time()
+                        first_token_time: Optional[float] = None
+                        last_report_time = start_time
+                        received_chars = 0
+                        LOGGER.info("VLM流式开始接收...（将定期报告进度）")
+                        final_text_chunks = []
+                        # 有些模型（如 Thinking 系列）会把主体内容放在 reasoning_content
+                        final_reasoning_chunks = []
+                        print("[VLM Streaming] ", end="", flush=True)
+                        reasoning_open = False
+                        for line_bytes in response.iter_lines(decode_unicode=False):
+                            if not line_bytes:  # 心跳/空行
+                                continue
+                            # 显式使用UTF-8解码
+                            try:
+                                line = line_bytes.decode('utf-8', errors='ignore')
+                            except Exception:
+                                # 兜底：按ISO-8859-1避免异常
+                                line = line_bytes.decode('latin-1', errors='ignore')
+                            if line.startswith('data:'):
+                                data_str = line[len('data:'):].strip()
+                                if data_str == "[DONE]":
+                                    # 在流式结束时，若思考段仍未关闭，则补齐关闭标签
+                                    if reasoning_open:
+                                        print("</think>", end="", flush=True)
+                                        reasoning_open = False
+                                    break
+                                try:
+                                    evt = json.loads(data_str)
+                                    # 兼容多种流式字段：choices[].delta.content 或 choices[].message.content
+                                    content_delta = None
+                                    reasoning_delta = None
+                                    choices = evt.get('choices') or []
+                                    if choices:
+                                        choice0 = choices[0]
+                                        delta = choice0.get('delta') or {}
+                                        content_delta = delta.get('content')
+                                        reasoning_delta = delta.get('reasoning_content')
+                                        if content_delta is None:
+                                            # 一些实现直接用message
+                                            message = choice0.get('message') or {}
+                                            content_delta = message.get('content')
+                                    if content_delta:
+                                        got_any_token = True
+                                        # 若之前处于<think>段中，则先闭合
+                                        if reasoning_open:
+                                            print("</think>", end="", flush=True)
+                                            reasoning_open = False
+                                        print(content_delta, end="", flush=True)
+                                        final_text_chunks.append(content_delta)
+                                        received_chars += len(content_delta)
+                                    if reasoning_delta:
+                                        got_any_token = True
+                                        # 推理内容以<think>标签包裹，首段打开，后续持续输出直到出现content或结束
+                                        if not reasoning_open:
+                                            print("<think>", end="", flush=True)
+                                            reasoning_open = True
+                                        print(reasoning_delta, end="", flush=True)
+                                        final_reasoning_chunks.append(reasoning_delta)
+                                        received_chars += len(reasoning_delta)
+                                    # 首字延迟与周期性进度日志
+                                    now = time.time()
+                                    if first_token_time is None and received_chars > 0:
+                                        first_token_time = now
+                                        LOGGER.info(f"VLM首字延迟: {first_token_time - start_time:.1f}s")
+                                    if now - last_report_time >= 15:
+                                        elapsed = now - start_time
+                                        LOGGER.info(f"VLM流式进度: 已接收约{received_chars}字符，耗时{elapsed:.0f}s")
+                                        last_report_time = now
+                                except Exception as parse_err:
+                                    LOGGER.debug(f"SSE行解析失败，忽略: {parse_err}; 行: {line[:200]}")
+                        # 若结束时仍在<think>中，补齐关闭标签后换行
+                        if reasoning_open:
+                            print("</think>", end="", flush=True)
+                            reasoning_open = False
+                        print()  # 换行
+                        final_text = ''.join(final_text_chunks).strip()
+                        # 若可见内容极少，尝试使用 reasoning_content 作为回退
+                        if len(final_text) < 5:
+                            alt = ''.join(final_reasoning_chunks).strip()
+                            if alt:
+                                final_text = alt
+                        if final_text:
+                            total_elapsed = time.time() - start_time
+                            LOGGER.success(f"VLM流式分析完成（模型: {model_name}），总耗时{total_elapsed:.1f}s，内容长度{len(final_text)}字符。")
+                            return final_text
+                        else:
+                            LOGGER.warning("VLM流式无内容返回，可能被中断。")
+                            # 当作中途卡住处理，进入重试
+                            raise requests.exceptions.ReadTimeout("VLM流式无内容")
+                    except requests.exceptions.ReadTimeout as e_timeout:
+                        if not got_any_token:
+                            LOGGER.warning(f"[try {attempt_idx}] 首字超时 {self.first_token_timeout_seconds}s，准备重试...")
+                        else:
+                            LOGGER.warning(f"[try {attempt_idx}] 流式中途卡住达到超时 {self.first_token_timeout_seconds}s，准备重试...")
+                        if attempt_idx >= self.stream_max_retries:
+                            LOGGER.error("VLM流式重试耗尽（超时）。")
+                            return "VLM分析暂时不可用（网络问题），建议稍后重试。"
+                        continue
+                    except requests.exceptions.RequestException as e_req:
+                        LOGGER.warning(f"[try {attempt_idx}] 流式请求异常: {e_req}，准备重试...")
+                        if attempt_idx >= self.stream_max_retries:
+                            LOGGER.error("VLM流式重试耗尽（请求异常）。")
+                            return "VLM分析暂时不可用（网络问题），建议稍后重试。"
+                        continue
+                    except Exception as e_any:
+                        LOGGER.warning(f"[try {attempt_idx}] 流式处理异常: {e_any}，准备重试...")
+                        if attempt_idx >= self.stream_max_retries:
+                            LOGGER.error("VLM流式重试耗尽（处理异常）。")
+                            return "VLM分析暂时不可用（网络问题），建议稍后重试。"
+                        continue
         except requests.exceptions.RequestException as e:
             LOGGER.error(f"VLM API请求失败: {e}")
             
