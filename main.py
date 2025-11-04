@@ -14,6 +14,7 @@ from btc_predictor.kline_plot import create_kline_image
 from data_ingestion.news_feeds import fetch_coindesk_news
 from decision_engine.vlm_analyzer import VLMAnalyzer
 from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
+from decision_engine.unified_analyzer import UnifiedGeminiAnalyzer
 from execution_engine.okx_trader import OKXTrader
 from utils.email_notifier import EmailNotifier
 from market_scanner import scan_for_opportunities # 导入市场扫描器
@@ -281,22 +282,28 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             LOGGER.info(f"[{symbol}] 是主攻币种，将执行完整的VLM和LLM深度分析，无论量化信号如何。")
 
         # ======================================================================
-        # 步骤 2: 初始化VLM分析器（仅用于K线图）
+        # 步骤 2: 根据模式准备图表资源（统一Gemini模式将仅生成图像；传统模式走VLM分析）
         # ======================================================================
-        print(f"\033[38;5;152m[{symbol}] 步骤 2: 初始化VLM分析器\033[0m")
-        LOGGER.info(f"[{symbol}] 步骤 2: 初始化VLM分析器")
-        vlm_analyzer = VLMAnalyzer()
-        vlm_analyzer.cache.cleanup_expired_cache()
-        cache_stats = vlm_analyzer.cache.get_cache_stats()
-        LOGGER.info(f"[{symbol}] 当前VLM缓存状态 - K线图: {cache_stats.get('kline_cache_count', 0)} 条")
+        use_unified = getattr(config, 'DECISION_RULES', {}).get('use_unified_gemini', False)
+        vlm_analyzer = None
+        kline_image_path_for_unified = None
+        if use_unified:
+            print(f"\033[38;5;152m[{symbol}] 步骤 2: 统一Gemini模式启用，仅生成1h K线图\033[0m")
+            LOGGER.info(f"[{symbol}] 统一Gemini模式启用，仅生成1h K线图（跳过VLM文本分析）")
+        else:
+            print(f"\033[38;5;152m[{symbol}] 步骤 2: 初始化VLM分析器\033[0m")
+            LOGGER.info(f"[{symbol}] 步骤 2: 初始化VLM分析器")
+            vlm_analyzer = VLMAnalyzer()
+            vlm_analyzer.cache.cleanup_expired_cache()
+            cache_stats = vlm_analyzer.cache.get_cache_stats()
+            LOGGER.info(f"[{symbol}] 当前VLM缓存状态 - K线图: {cache_stats.get('kline_cache_count', 0)} 条")
 
         # ======================================================================
-        # 步骤 3: 生成并分析多时间框架的K线图
+        # 步骤 3: 生成并（按模式）分析1h K线图
         # ======================================================================
-        print(f"\033[38;5;152m[{symbol}] 步骤 3: 生成并分析1h K线图\033[0m")
-        LOGGER.info(f"[{symbol}] 步骤 3: 生成并分析1h K线图")
-        
-        # --- VLM分析前后动态切换代理 ---
+        print(f"\033[38;5;152m[{symbol}] 步骤 3: 生成1h K线图{'' if use_unified else '并进行VLM分析'}\033[0m")
+        LOGGER.info(f"[{symbol}] 步骤 3: 生成1h K线图{'' if use_unified else '并进行VLM分析'}")
+
         import os
         def save_proxy_env():
             return {k: os.environ.get(k) for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']}
@@ -314,10 +321,21 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         _orig_proxy_env = save_proxy_env()
         clear_proxy_env()
         try:
-            def perform_vlm_analysis():
-                analysis_1h, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "1H", "1h")
-                return analysis_1h
-            analysis_1h = track_process('vlm_analysis', perform_vlm_analysis)
+            if use_unified:
+                def generate_image_only():
+                    if price_data_for_ma is None or price_data_for_ma.empty:
+                        return None
+                    result = create_kline_image(price_data_for_ma, timeframe='1h')
+                    if not result:
+                        return None
+                    return result[0]  # image_path
+                kline_image_path_for_unified = track_process('kline_image', generate_image_only)
+                analysis_1h = None  # 统一模式下不生成文本分析
+            else:
+                def perform_vlm_analysis():
+                    analysis_1h_val, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "1H", "1h")
+                    return analysis_1h_val
+                analysis_1h = track_process('vlm_analysis', perform_vlm_analysis)
         finally:
             restore_proxy_env(_orig_proxy_env)
 
@@ -329,7 +347,7 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         market_news = track_process('news_intelligence', get_market_intelligence, symbol=symbol)
 
         # ======================================================================
-        # 步骤 5: LLM决策引擎
+        # 步骤 5: LLM决策引擎（支持统一Gemini路径）
         # ======================================================================
         print(f"\033[38;5;152m[{symbol}] 步骤 5: 获取持仓并进行LLM决策\033[0m")
         LOGGER.info(f"[{symbol}] 步骤 5: 获取持仓并进行LLM决策")
@@ -353,20 +371,53 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                 'message': '跳过LLM分析'
             }
         else:
-            def perform_llm_decision():
-                analyzer = DeepSeekAnalyzer()
-                decision = analyzer.get_trade_decision(
-                    quant_signals=quant_signal_data,
-                    twitter_data=market_news,
-                    kline_analysis={"1h": analysis_1h},
-                    current_position=current_position,
-                    current_balance=current_balance,
-                    symbol=symbol
-                )
-                decision['symbol'] = symbol
-                return decision
-
-            final_decision = track_process('llm_decision', perform_llm_decision)
+            if use_unified and kline_image_path_for_unified:
+                def perform_unified_decision():
+                    try:
+                        analyzer = UnifiedGeminiAnalyzer()
+                        decision = analyzer.get_trade_decision_unified(
+                            quant_signals=quant_signal_data,
+                            twitter_data=market_news,
+                            kline_image_path=kline_image_path_for_unified,
+                            timeframe='1h',
+                            current_position=current_position,
+                            current_balance=current_balance,
+                            symbol=symbol,
+                        )
+                        decision['symbol'] = symbol
+                        return decision
+                    except Exception as e:
+                        LOGGER.error(f"统一Gemini路径失败: {e}")
+                        if getattr(config, 'DECISION_RULES', {}).get('unified_fallback_enabled', True):
+                            LOGGER.warning("触发回退：改用 VLM + DeepSeek 传统路径。")
+                            ds = DeepSeekAnalyzer()
+                            # 如统一路径失败且之前未跑VLM文本，则提供空分析
+                            decision_fb = ds.get_trade_decision(
+                                quant_signals=quant_signal_data,
+                                twitter_data=market_news,
+                                kline_analysis={"1h": analysis_1h or ""},
+                                current_position=current_position,
+                                current_balance=current_balance,
+                                symbol=symbol,
+                            )
+                            decision_fb['symbol'] = symbol
+                            return decision_fb
+                        raise
+                final_decision = track_process('llm_decision', perform_unified_decision)
+            else:
+                def perform_llm_decision():
+                    analyzer = DeepSeekAnalyzer()
+                    decision = analyzer.get_trade_decision(
+                        quant_signals=quant_signal_data,
+                        twitter_data=market_news,
+                        kline_analysis={"1h": analysis_1h},
+                        current_position=current_position,
+                        current_balance=current_balance,
+                        symbol=symbol
+                    )
+                    decision['symbol'] = symbol
+                    return decision
+                final_decision = track_process('llm_decision', perform_llm_decision)
 
         # ======================================================================
         # 步骤 6: 保存并打印决策报告
