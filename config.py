@@ -40,6 +40,10 @@ DECISION_RULES = {
     'strict_long_trigger': os.getenv('STRICT_LONG_TRIGGER', 'true').lower() == 'true',
     # 允许仅凭VLM做单（其余来源仅做反证）。
     'vlm_solo_trade': os.getenv('VLM_SOLO_TRADE', 'true').lower() == 'true',
+    # 是否启用“统一Gemini”决策路径（VLM+LLM合并，直接用多模态）
+    'use_unified_gemini': os.getenv('USE_UNIFIED_GEMINI', 'true').lower() == 'true',
+    # 统一路径失败时是否自动回退到原先“VLM分析 + DeepSeek决策”路径
+    'unified_fallback_enabled': os.getenv('UNIFIED_FALLBACK_ENABLED', 'true').lower() == 'true',
 }
 
 # ----------------- 自动更新与热重载 -----------------
@@ -132,6 +136,11 @@ API_KEYS = {
         'api_key': os.getenv('DEEPSEEK_API_KEY'),
         'base_url': os.getenv('DEEPSEEK_BASE_URL', "https://api.siliconflow.cn/v1"),
         'model': os.getenv('DEEPSEEK_MODEL', "deepseek-ai/DeepSeek-R1")
+    },
+    "gemini": {
+        'api_key': os.getenv('GEMINI_API_KEY'),
+        'base_url': os.getenv('GEMINI_BASE_URL', 'https://jeniya.cn/v1'),
+        'model': os.getenv('GEMINI_MODEL', 'gemini-2.5-pro')
     },
     "twitter": {
         "x-rapidapi-key": os.getenv('TWITTER_RAPIDAPI_KEY'),

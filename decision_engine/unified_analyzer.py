@@ -1,0 +1,234 @@
+import base64
+import json
+import mimetypes
+import os
+import re
+from datetime import datetime, timezone
+from typing import Dict, List, Any, Optional, Tuple
+
+from openai import OpenAI
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+import config
+from btc_predictor.utils import LOGGER
+
+
+class UnifiedGeminiAnalyzer:
+    """
+    使用 Gemini (OpenAI兼容) 的多模态能力，合并 VLM 与 LLM 决策：
+    - 直接输入 1H K线图（图片）+ 量化信号 + 新闻情报 + 持仓与余额
+    - 输出与 DeepSeekAnalyzer 相同结构的交易决策 JSON
+
+    基于 OpenAI SDK，base_url 配置为 `https://jeniya.cn/v1`，model 为 `gemini-2.5-pro`（可经环境变量覆盖）。
+    若调用失败，可在上层启用回退逻辑：走“VLM分析 + DeepSeek决策”老路径。
+    """
+
+    def __init__(self):
+        gemini_config = config.API_KEYS.get('gemini', {})
+        self.base_url = gemini_config.get('base_url')
+        self.api_key = gemini_config.get('api_key')
+        self.model = gemini_config.get('model', 'gemini-2.5-pro')
+
+        if not all([self.base_url, self.api_key, self.model]):
+            raise ValueError("Gemini API的配置不完整 (base_url, api_key, model)。")
+
+        self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+
+    def _parse_llm_json_response(self, response_text: str) -> Dict[str, Any]:
+        if not response_text:
+            raise ValueError("LLM返回了空内容。")
+
+        cleaned_text = response_text.strip()
+        cleaned_text = re.sub(r'^```json\s*', '', cleaned_text)
+        cleaned_text = re.sub(r'\s*```$', '', cleaned_text)
+
+        try:
+            return json.loads(cleaned_text)
+        except json.JSONDecodeError:
+            pass
+
+        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        matches = re.findall(json_pattern, cleaned_text, re.DOTALL)
+        for json_str in reversed(matches):
+            try:
+                obj = json.loads(re.sub(r'\s+', ' ', json_str.strip()))
+                return obj
+            except json.JSONDecodeError:
+                continue
+        raise ValueError(f"无法解析JSON。原始响应片段: {response_text[:200]}...")
+
+    def _encode_image(self, image_path: str) -> Tuple[str, str]:
+        with open(image_path, 'rb') as f:
+            b64 = base64.b64encode(f.read()).decode('utf-8')
+        mime = mimetypes.guess_type(image_path)[0] or 'image/png'
+        return b64, mime
+
+    def _format_quant_signals(self, quant_signals: List[Dict[str, Any]]) -> str:
+        if not quant_signals:
+            return "### 内部量化模型矩阵\n- 未提供任何量化信号。\n"
+        text = "### 内部量化模型矩阵\n"
+        for s in quant_signals:
+            strategy = s.get('strategy', '未知策略')
+            signal = s.get('signal', 'HOLD')
+            info = s.get('action') or s.get('info', '无详细信息。')
+            current_price = s.get('current_price')
+            text += f"\n#### 策略: {strategy}\n"
+            if str(signal).upper() == 'HOLD':
+                text += "- **信号类型**: **HOLD** （无入场信号：无持仓→保持空仓；有持仓→不加不减）\n"
+            else:
+                text += f"- **信号类型**: **{signal}**\n"
+            text += f"- **策略分析**: {info}\n"
+            if current_price:
+                try:
+                    text += f"- **参考价格**: ${float(current_price):.2f}\n"
+                except Exception:
+                    text += f"- **参考价格**: {current_price}\n"
+        return text
+
+    def _format_news(self, twitter_data: List[Dict[str, Any]]) -> str:
+        part = "## 1. 社交媒体与新闻情报\n\n"
+        if not twitter_data:
+            return part + "无有效的社交媒体或新闻情报。\n"
+        part += "### 1.1 CoinDesk 最新市场新闻 (高优先级)\n分析以下来自CoinDesk的最新市场新闻：\n"
+        for item in twitter_data:
+            source = item.get('source', 'CoinDesk')
+            title = (item.get('text') or '').replace('\n', ' ').strip() or '无标题'
+            desc = (item.get('description') or '').replace('\n', ' ').strip()
+            created_at = item.get('created_at', '未知时间')
+            part += f"\n**来自: {source}** | {created_at}\n"
+            part += f"**标题**: {title}\n"
+            if desc and desc != '无摘要':
+                part += f"**摘要**: {desc}\n"
+            part += "-" * 50 + "\n"
+        return part
+
+    def _build_prompt(self, quant_signals: List[Dict[str, Any]], twitter_data: List[Dict[str, Any]], current_position: Optional[Dict[str, Any]], current_balance: Optional[float], symbol: str) -> str:
+        from datetime import datetime, timezone
+        current_time_utc = datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S %Z')
+        asset_name = symbol.split('-')[0] if symbol else '资产'
+        market_price = None
+        if quant_signals and quant_signals[0].get('current_price') is not None:
+            market_price = quant_signals[0].get('current_price')
+
+        position_text = "## 1. 当前持仓状态\n\n"
+        if not current_position or not current_position.get('posSide'):
+            position_text += "当前**无持仓**。\n"
+        else:
+            side = current_position.get('posSide')
+            qty = current_position.get('posCcy') or current_position.get('pos')
+            avg_price = current_position.get('avgPx')
+            leverage = current_position.get('lever')
+            if side == 'net':
+                try:
+                    pos_val = float(current_position.get('pos', 0))
+                except Exception:
+                    pos_val = 0
+                if pos_val > 0:
+                    position_text += f"- **持仓方向**: **做多 (LONG, net模式, pos={pos_val})**\n"
+                elif pos_val < 0:
+                    position_text += f"- **持仓方向**: **做空 (SHORT, net模式, pos={pos_val})**\n"
+                else:
+                    position_text += "当前**无持仓**。\n"
+            elif side == 'long':
+                position_text += f"- **持仓方向**: **做多 (LONG)**\n"
+            elif side == 'short':
+                position_text += f"- **持仓方向**: **做空 (SHORT)**\n"
+            position_text += f"- **持仓数量**: {qty} {asset_name}\n"
+            position_text += f"- **开仓均价**: ${avg_price}\n"
+            position_text += f"- **杠杆倍数**: {leverage}x\n"
+
+        balance_text = "## 2. 当前账户余额\n\n"
+        if current_balance is not None:
+            balance_text += f"当前账户余额: **${current_balance:.2f} USDT**\n可用于交易的资金: **${current_balance * 0.95:.2f} USDT** (95%)\n"
+        else:
+            balance_text += "无法获取当前账户余额信息。\n"
+
+        qs_text = self._format_quant_signals(quant_signals)
+        news_text = self._format_news(twitter_data)
+
+        prompt = f"""
+# 角色
+你是一名顶级的加密货币**期货**短线交易策略师，当前策略为单一 **1小时 (1H)** 时间框的快进快出操作。你必须结合图像与文本做出可执行决策。你正在为 **{asset_name}** 做决策。
+
+- **当前时间(UTC)**: {current_time_utc}
+- **市场价格**: {f"${market_price:.2f}" if isinstance(market_price, (int, float)) else "未知"}
+
+# 输入
+（1）一张 1H K线图（在本消息中作为图片内容附带）。
+（2）以下结构化信息：
+{position_text}
+{balance_text}
+{news_text}
+{qs_text}
+
+# 分析与约束
+1. 仅基于 1H 结构与动量把握 1-6 小时机会；证据不足或冲突→`HOLD`。
+2. **空头门槛（更高要求）**：仅当以下至少两项同时满足才可 `SHORT`：
+   - 1H 明确看跌且关键位被有效跌破；
+   - 内部量化模型矩阵出现空头/强烈动量；
+   - 新闻出现突发、可信的实质性利空。
+3. **资金优先 (硬性要求)**：若开仓（LONG/SHORT），计算满足交易所**最小开仓名义价值**所需最低杠杆：
+   所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。
+
+# 输出JSON（严格JSON，不要多余文字）
+{{
+  "decision": "LONG/SHORT/HOLD/CLOSE_LONG/CLOSE_SHORT",
+  "reasoning": "详述完整逻辑链。先述当前持仓与盈亏语义，再论证图像结构、量化与新闻，最后给出风险与参数。",
+  "key_signals_detected": "列出本次决策的关键多/空/风险信号。没有则写无。",
+  "confidence": 0.0,
+  "suggested_trade_size": 0.95,
+  "trade_params": {{
+    "leverage": 2,
+    "take_profit_pct": 8.0,
+    "stop_loss_pct": 4.0
+  }},
+  "risk_assessment": "对本次交易潜在风险的简要评估与风控措施"
+}}
+""".strip()
+        return prompt
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    def get_trade_decision_unified(
+        self,
+        quant_signals: List[Dict[str, Any]],
+        twitter_data: List[Dict[str, Any]],
+        kline_image_path: str,
+        timeframe: str = '1h',
+        current_position: Optional[Dict[str, Any]] = None,
+        current_balance: Optional[float] = None,
+        symbol: str = 'BTC-USDT-SWAP',
+    ) -> Dict[str, Any]:
+        """
+        使用单次多模态请求（图像+文本）得到最终决策。输出结构与 DeepSeekAnalyzer 保持一致。
+        """
+        LOGGER.info(f"[UnifiedGemini] 启动统一多模态决策，请求模型: {self.model}")
+
+        prompt = self._build_prompt(quant_signals, twitter_data, current_position, current_balance, symbol)
+        img_b64, mime = self._encode_image(kline_image_path)
+        img_url = f"data:{mime};base64,{img_b64}"
+
+        response = self.client.chat.completions.create(
+            model=self.model,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": prompt},
+                        {"type": "image_url", "image_url": {"url": img_url, "detail": "high"}},
+                    ],
+                }
+            ],
+            temperature=0.4,
+            max_tokens=1200,
+            stream=False,
+            response_format={"type": "json_object"},
+        )
+
+        raw = response.choices[0].message.content
+        parsed = self._parse_llm_json_response(raw)
+        # 最低字段保障
+        parsed.setdefault('key_signals_detected', '无关键风险信号')
+        parsed.setdefault('trade_params', {})
+        return parsed
+
+
