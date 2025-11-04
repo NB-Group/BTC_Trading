@@ -27,7 +27,7 @@ class UnifiedGeminiAnalyzer:
         gemini_config = config.API_KEYS.get('gemini', {})
         self.base_url = gemini_config.get('base_url')
         self.api_key = gemini_config.get('api_key')
-        self.model = gemini_config.get('model', 'gemini-2.5-pro')
+        self.model = gemini_config.get('model', 'gemini-2.5-pro-thinking')
 
         if not all([self.base_url, self.api_key, self.model]):
             raise ValueError("Gemini API的配置不完整 (base_url, api_key, model)。")
@@ -55,6 +55,8 @@ class UnifiedGeminiAnalyzer:
                 return obj
             except json.JSONDecodeError:
                 continue
+        
+        print(f"--- 完整的原始响应 ---\n{response_text}\n--------------------")
         raise ValueError(f"无法解析JSON。原始响应片段: {response_text[:200]}...")
 
     def _encode_image(self, image_path: str) -> Tuple[str, str]:
@@ -146,12 +148,30 @@ class UnifiedGeminiAnalyzer:
         qs_text = self._format_quant_signals(quant_signals)
         news_text = self._format_news(twitter_data)
 
+        market_price_text = f"${market_price:.2f}" if isinstance(market_price, (int, float)) else "未知"
+
+        # 使用程序化方式构造 JSON 模板，避免 f-string 花括号转义问题
+        json_template = {
+            "decision": "LONG/SHORT/HOLD/CLOSE_LONG/CLOSE_SHORT",
+            "reasoning": "详述完整逻辑链。先述当前持仓与盈亏语义，再论证图像结构、量化与新闻，最后给出风险与参数。",
+            "key_signals_detected": "列出本次决策的关键多/空/风险信号。没有则写无。",
+            "confidence": 0.0,
+            "suggested_trade_size": 0.95,
+            "trade_params": {
+                "leverage": 2,
+                "take_profit_pct": 8.0,
+                "stop_loss_pct": 4.0
+            },
+            "risk_assessment": "对本次交易潜在风险的简要评估与风控措施"
+        }
+        json_template_text = json.dumps(json_template, ensure_ascii=False, indent=2)
+
         prompt = f"""
 # 角色
 你是一名顶级的加密货币**期货**短线交易策略师，当前策略为单一 **1小时 (1H)** 时间框的快进快出操作。你必须结合图像与文本做出可执行决策。你正在为 **{asset_name}** 做决策。
 
 - **当前时间(UTC)**: {current_time_utc}
-- **市场价格**: {f"${market_price:.2f}" if isinstance(market_price, (int, float)) else "未知"}
+- **市场价格**: {market_price_text}
 
 # 输入
 （1）一张 1H K线图（在本消息中作为图片内容附带）。
@@ -171,19 +191,7 @@ class UnifiedGeminiAnalyzer:
    所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。
 
 # 输出JSON（严格JSON，不要多余文字）
-{{
-  "decision": "LONG/SHORT/HOLD/CLOSE_LONG/CLOSE_SHORT",
-  "reasoning": "详述完整逻辑链。先述当前持仓与盈亏语义，再论证图像结构、量化与新闻，最后给出风险与参数。",
-  "key_signals_detected": "列出本次决策的关键多/空/风险信号。没有则写无。",
-  "confidence": 0.0,
-  "suggested_trade_size": 0.95,
-  "trade_params": {{
-    "leverage": 2,
-    "take_profit_pct": 8.0,
-    "stop_loss_pct": 4.0
-  }},
-  "risk_assessment": "对本次交易潜在风险的简要评估与风控措施"
-}}
+{json_template_text}
 """.strip()
         return prompt
 
@@ -203,7 +211,41 @@ class UnifiedGeminiAnalyzer:
         """
         LOGGER.info(f"[UnifiedGemini] 启动统一多模态决策，请求模型: {self.model}")
 
-        prompt = self._build_prompt(quant_signals, twitter_data, current_position, current_balance, symbol)
+        # 1. 构建系统提示
+        system_prompt = f"""
+你是一个专业的加密货币（特别是BTC比特币）期货交易决策系统。你的核心任务是分析K线图、技术指标、市场新闻和内部量化模型信号，为用户提供精确、审慎的交易决策。
+
+**请严格遵守以下指令:**
+
+1.  **决策逻辑**:
+    *   **整合分析**: 综合考虑所有输入信息。如果不同来源的信号冲突（例如，图表看涨但量化模型看跌），优先选择“HOLD”或降低仓位，并明确说明冲突点。
+    *   **风险第一**: 始终将风险管理放在首位。在没有高确定性信号时，保持空仓（HOLD）是默认选项。
+    *   **禁止追涨杀跌**: 避免在价格大幅波动后立即入场。鼓励在关键支撑/阻力位或明确的技术形态突破后行动。
+    *   **具体参数**: 如果决策是 'LONG' 或 'SHORT'，必须提供明确的止盈（take_profit）和止损（stop_loss）价格。
+
+2.  **输出格式**:
+    *   **必须严格遵循下面的JSON格式**，不得添加任何额外解释或注释。
+    *   **所有输出内容，特别是 `reasoning`, `key_signals`, 和 `risk_assessment` 字段，必须使用【中文】进行说明。**
+
+    ```json
+    {{
+        "decision": "...", // 必须是 'LONG', 'SHORT', 'HOLD' 或 'CLOSE' 其中之一
+        "trade_parameters": {{
+            "leverage": "...", // 例如 '10x', 如果是 'HOLD' 或 'CLOSE' 则为 'None'
+            "take_profit": "...", // 价格, 如果是 'HOLD' 或 'CLOSE' 则为 'N/A'
+            "stop_loss": "..." // 价格, 如果是 'HOLD' 或 'CLOSE' 则为 'N/A'
+        }},
+        "reasoning": "...", // 详细的中文决策逻辑和市场分析
+        "key_signals": [
+            "..." // 关键信号列表（中文）
+        ],
+        "risk_assessment": "..." // 风险评估（中文）
+    }}
+    ```
+"""
+
+        # 2. 构建用户提示
+        user_prompt = self._build_prompt(quant_signals, twitter_data, current_position, current_balance, symbol)
         img_b64, mime = self._encode_image(kline_image_path)
         img_url = f"data:{mime};base64,{img_b64}"
 
@@ -213,19 +255,48 @@ class UnifiedGeminiAnalyzer:
                 {
                     "role": "user",
                     "content": [
-                        {"type": "text", "text": prompt},
+                        {"type": "text", "text": user_prompt},
                         {"type": "image_url", "image_url": {"url": img_url, "detail": "high"}},
                     ],
                 }
             ],
             temperature=0.4,
-            max_tokens=1200,
+            max_tokens=1048576,
             stream=False,
             response_format={"type": "json_object"},
         )
 
-        raw = response.choices[0].message.content
-        parsed = self._parse_llm_json_response(raw)
+        # 优先使用 SDK 在 json_object 模式下可能提供的已解析结果；否则回退到文本解析
+        choice = response.choices[0].message
+        try:
+            if hasattr(choice, 'parsed') and getattr(choice, 'parsed') is not None:  # type: ignore[attr-defined]
+                parsed = getattr(choice, 'parsed')  # type: ignore[assignment]
+            else:
+                raw = choice.content
+                if isinstance(raw, (dict, list)):
+                    parsed = raw  # type: ignore[assignment]
+                else:
+                    parsed = self._parse_llm_json_response(raw or "")
+        except Exception as parse_err:
+            # 解析失败时，返回包含完整原始响应的回退决策，便于定位问题
+            try:
+                raw_text = choice.content if isinstance(choice.content, str) else str(choice.content)
+            except Exception:
+                raw_text = None
+            LOGGER.warning(
+                f"[UnifiedGemini] JSON解析失败: {type(parse_err).__name__}: {parse_err}. 将返回原始响应文本以便诊断。",
+                exc_info=True,
+            )
+            parsed = {
+                "decision": "HOLD",
+                "reasoning": "LLM JSON解析失败，已返回原始响应以便诊断。",
+                "key_signals_detected": "无关键风险信号",
+                "confidence": 0.0,
+                "suggested_trade_size": 0.95,
+                "trade_params": {},
+                "raw_response_text": raw_text,
+                "parse_error": f"{type(parse_err).__name__}: {parse_err}",
+            }
         # 最低字段保障
         parsed.setdefault('key_signals_detected', '无关键风险信号')
         parsed.setdefault('trade_params', {})

@@ -6,6 +6,7 @@ import argparse
 from datetime import datetime, timezone
 import schedule
 from functools import partial
+from tenacity import RetryError
 
 import config
 from btc_predictor.predict import get_live_trade_signal, get_rf4_signal, get_bollinger_breakout_signal, get_ma_crossover_signal
@@ -73,6 +74,19 @@ def print_decision_report(report: Dict[str, Any]):
     print("\033[38;5;102m" + "-" * 80 + "\033[0m")
     print("\033[38;5;109m  - 风险评估:\033[0m")
     print(f"\033[38;5;145m    {report.get('risk_assessment', 'N/A')}\033[0m")
+
+    # 若存在原始模型输出（通常是JSON解析失败时的诊断信息），完整输出以便排查
+    raw_text = report.get('raw_response_text')
+    parse_error = report.get('parse_error')
+    if raw_text is not None or parse_error is not None:
+        print("\033[38;5;102m" + "-" * 80 + "\033[0m")
+        print("\033[38;5;174m  - 诊断: JSON解析失败，原始模型输出如下\033[0m")
+        if parse_error:
+            print(f"\033[38;5;145m    错误: {parse_error}\033[0m")
+        if raw_text is not None:
+            print("\033[38;5;102m" + "-" * 80 + "\033[0m")
+            print("\033[38;5;109m  - 原始模型输出:\033[0m")
+            print(raw_text)
     print("\033[38;5;102m" + "="*80 + "\033[0m" + "\n")
 
 def _get_last_run_timestamp() -> datetime | None:
@@ -387,7 +401,19 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                         decision['symbol'] = symbol
                         return decision
                     except Exception as e:
-                        LOGGER.error(f"统一Gemini路径失败: {e}")
+                        # 优先展开重试错误的“最后一次尝试”的真实异常，便于定位问题
+                        if isinstance(e, RetryError):
+                            try:
+                                last_exc = e.last_attempt.exception()  # type: ignore[attr-defined]
+                            except Exception:
+                                last_exc = None
+                            if last_exc is not None:
+                                # 避免格式化器解析异常消息中的花括号，改用 f-string
+                                LOGGER.error(f"统一Gemini路径失败（最后一次尝试）: {type(last_exc).__name__}: {last_exc}")
+                            else:
+                                LOGGER.error(f"统一Gemini路径失败: {type(e).__name__}: {e}")
+                        else:
+                            LOGGER.error(f"统一Gemini路径失败: {type(e).__name__}: {e}")
                         if getattr(config, 'DECISION_RULES', {}).get('unified_fallback_enabled', True):
                             LOGGER.warning("触发回退：改用 VLM + DeepSeek 传统路径。")
                             ds = DeepSeekAnalyzer()
@@ -403,7 +429,12 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                             decision_fb['symbol'] = symbol
                             return decision_fb
                         raise
-                final_decision = track_process('llm_decision', perform_unified_decision)
+                _orig_proxy_env_decision = save_proxy_env()
+                clear_proxy_env()
+                try:
+                    final_decision = track_process('llm_decision', perform_unified_decision)
+                finally:
+                    restore_proxy_env(_orig_proxy_env_decision)
             else:
                 def perform_llm_decision():
                     analyzer = DeepSeekAnalyzer()
@@ -417,7 +448,12 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     )
                     decision['symbol'] = symbol
                     return decision
-                final_decision = track_process('llm_decision', perform_llm_decision)
+                _orig_proxy_env_decision = save_proxy_env()
+                clear_proxy_env()
+                try:
+                    final_decision = track_process('llm_decision', perform_llm_decision)
+                finally:
+                    restore_proxy_env(_orig_proxy_env_decision)
 
         # ======================================================================
         # 步骤 6: 保存并打印决策报告
