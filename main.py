@@ -367,6 +367,13 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         LOGGER.info(f"[{symbol}] 步骤 5: 获取持仓并进行LLM决策")
         
         current_position = trader.get_position(symbol)
+        try:
+            if current_position:
+                LOGGER.info(f"[{symbol}] 当前持仓快照: posSide={current_position.get('posSide')}, pos={current_position.get('pos')}, avgPx={current_position.get('avgPx')}, upl={current_position.get('upl')}")
+            else:
+                LOGGER.info(f"[{symbol}] 当前无持仓或无法获取持仓信息")
+        except Exception:
+            pass
         current_balance = trader.get_balance('USDT')
         
         if skip_llm:
@@ -460,6 +467,60 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         # ======================================================================
         print(f"\033[38;5;152m[{symbol}] 步骤 6: 保存并打印决策报告\033[0m")
         LOGGER.info(f"[{symbol}] 步骤 6: 保存并打印决策报告")
+        # 在保存与发送邮件前，注入持仓盈亏快照/状态卡片
+        try:
+            if current_position:
+                asset_name = symbol.split('-')[0] if symbol else '资产'
+                qty = current_position.get('pos') or current_position.get('posCcy') or '0'
+                avg_price = current_position.get('avgPx') or current_position.get('basePx') or '0'
+
+                # 尽量使用OKX原始未实现盈亏（USDT）
+                upl_raw = current_position.get('upl')
+                pnl_usd: float
+                if upl_raw is not None:
+                    try:
+                        pnl_usd = float(upl_raw)
+                    except Exception:
+                        pnl_usd = 0.0
+                else:
+                    pnl_usd = 0.0
+
+                pos_side = current_position.get('posSide')
+                if pos_side == 'net':
+                    try:
+                        pos_val = float(current_position.get('pos', 0) or 0)
+                    except Exception:
+                        pos_val = 0.0
+                    pos_side_display = "多头" if pos_val > 0 else ("空头" if pos_val < 0 else "无持仓")
+                elif pos_side == 'long':
+                    pos_side_display = "多头"
+                elif pos_side == 'short':
+                    pos_side_display = "空头"
+                else:
+                    pos_side_display = "未知"
+
+                # 若识别为“无持仓”，也显示状态卡片
+                if pos_side_display == "无持仓":
+                    final_decision['position_snapshot'] = {
+                        'status': 'no_position',
+                        'desc': '当前无持仓',
+                    }
+                else:
+                    desc = f"{pos_side_display} | 数量: {qty} {asset_name} | 开仓均价: ${avg_price}"
+                    if isinstance(pnl_usd, (int, float)):
+                        final_decision['position_snapshot'] = {
+                            'pnl_usd': pnl_usd,
+                            'desc': desc,
+                        }
+            else:
+                # 无法获取持仓或确实无持仓时，也显示“无持仓”卡片
+                final_decision['position_snapshot'] = {
+                    'status': 'no_position',
+                    'desc': '当前无持仓',
+                }
+        except Exception as e:
+            LOGGER.warning(f"构建持仓盈亏快照失败: {e}")
+
         save_decision_report(final_decision)
         print_decision_report(final_decision)
 
