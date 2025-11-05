@@ -330,22 +330,42 @@ class EmailNotifier:
                             <p>{current_time}</p>
                         </div>
         """
-        # 可选：持仓盈亏卡片
+        # 可选：持仓卡片（有持仓显示盈亏；无持仓显示状态）
         if position_snapshot and isinstance(position_snapshot, dict):
             try:
-                pnl_usd = float(position_snapshot.get('pnl_usd', 0.0))
-                pnl_color = '#28a745' if pnl_usd >= 0 else '#dc3545'
-                pnl_prefix = '+' if pnl_usd >= 0 else '-'
-                pos_desc = position_snapshot.get('desc', '')
-                html += f"""
+                if position_snapshot.get('status') == 'no_position' or position_snapshot.get('no_position'):
+                    pos_desc = position_snapshot.get('desc', '当前无持仓')
+                    html += f"""
+                        <div class="info-card">
+                            <h3><i class="fas fa-box-open"></i> 持仓状态</h3>
+                            <p style="font-weight: 600;">{pos_desc}</p>
+                        </div>
+                    """
+                else:
+                    pnl_usd = float(position_snapshot.get('pnl_usd', 0.0))
+                    pnl_color = '#28a745' if pnl_usd >= 0 else '#dc3545'
+                    pnl_prefix = '+' if pnl_usd >= 0 else '-'
+                    pos_desc = position_snapshot.get('desc', '')
+                    html += f"""
                         <div class="info-card">
                             <h3><i class="fas fa-dollar-sign"></i> 持仓盈亏</h3>
-                            <p style="font-weight: 600; color: {pnl_color};">{pnl_prefix}${abs(pnl_usd):.2f} USDT</p>
-                            <div style="font-size: 12px; color: #6c757d;">{pos_desc}</div>
+                            <p style=\"font-weight: 600; color: {pnl_color};\">{pnl_prefix}${abs(pnl_usd):.2f} USDT</p>
+                            <div style=\"font-size: 12px; color: #6c757d;\">{pos_desc}</div>
                         </div>
-                """
+                    """
             except Exception:
-                pass
+                # 回退：若无法解析盈亏但有描述，仍显示持仓状态
+                try:
+                    pos_desc = position_snapshot.get('desc')
+                    if pos_desc:
+                        html += f"""
+                        <div class=\"info-card\">
+                            <h3><i class=\"fas fa-box-open\"></i> 持仓状态</h3>
+                            <p style=\"font-weight: 600;\">{pos_desc}</p>
+                        </div>
+                        """
+                except Exception:
+                    pass
         html += f"""
                     </div>
                     
