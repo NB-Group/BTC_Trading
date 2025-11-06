@@ -1,0 +1,14 @@
+[tool.commitizen]
+name = "cz_conventional_commits"
+tag_format = "v$version"
+update_changelog_on_bump = true
+major_version_zero = true
+changelog_file = "CHANGELOG.md"
+use_shortcuts = true
+message_template = "{type}{scope}: {subject} | EN: {body}"
+
+# 校验规则：允许最常见类型，要求主题中包含中文优先与 EN 尾巴
+[tool.commitizen.customize]
+schema_pattern = "^(feat|fix|chore|docs|refactor|perf|test|ci|build|revert)(\\([^\\)]+\\))?: .+ \\| EN: .+"
+commit_parser = "(?P<change_type>feat|fix|chore|docs|refactor|perf|test|ci|build|revert)(?:\\((?P<scope>[^)]+)\\))?: (?P<subject>.*?) \\| EN: (?P<body>.*)"
+

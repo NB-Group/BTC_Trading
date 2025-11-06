@@ -197,6 +197,32 @@ MACRO_ECONOMIC_KEYWORDS = [
 4. 推送到分支 (`git push origin feature/AmazingFeature`)
 5. 开启 Pull Request
 
+## 📝 提交规范与校验（中文优先 + 简短 EN）
+
+- 使用中文优先的约定式提交（Conventional Commits）：
+  - 格式：`类型(范围可选): 主题 | EN: short english`
+  - 类型：feat, fix, chore, docs, refactor, perf, test, ci, build, revert
+  - 示例：`fix(execution): 修复平仓失败的边界条件 | EN: fix close position edge case`
+
+- 已提供提交模板与自动校验：
+  - 模板：`.gitmessage`（已自动配置为默认模板）
+  - 校验：Commitizen（commit-msg 钩子自动检查；未安装时仅提示不阻塞）
+
+### 开发者本地一次性设置
+
+```bash
+pip install -r requirements-dev.txt
+git config commit.template .gitmessage
+git config core.hooksPath githooks
+```
+
+### 协作者主干同步（历史已重写）
+
+```bash
+git fetch --all --tags
+git reset --hard origin/main
+```
+
 ## 📄 许可证
 
 本项目采用 AGPL 许可证 - 查看 [LICENSE](LICENSE) 文件了解详情

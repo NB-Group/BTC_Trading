@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+
+# Cross-platform safety: only enforce if commitizen is available
+if command -v cz >/dev/null 2>&1; then
+  cz check --commit-msg-file "$1"
+  exit $?
+fi
+
+# Fallback to python -m commitizen if cz is not on PATH
+python - <<'PY'
+import os, sys, subprocess
+msgfile = sys.argv[1]
+try:
+    subprocess.check_call([sys.executable, '-m', 'commitizen', 'check', '--commit-msg-file', msgfile])
+    sys.exit(0)
+except FileNotFoundError:
+    pass
+except subprocess.CalledProcessError as e:
+    sys.exit(e.returncode)
+
+print('[commit-msg] commitizen 未安装，跳过严格校验。建议: pip install commitizen')
+sys.exit(0)
+PY
+
