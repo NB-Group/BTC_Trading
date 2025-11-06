@@ -6,19 +6,16 @@ if command -v cz >/dev/null 2>&1; then
   exit $?
 fi
 
-# Fallback to python -m commitizen if cz is not on PATH
-python - <<'PY'
-import os, sys, subprocess
+# Fallback: use python only if commitizen is installed
+python - "$1" <<'PY'
+import sys, importlib.util, subprocess
 msgfile = sys.argv[1]
-try:
-    subprocess.check_call([sys.executable, '-m', 'commitizen', 'check', '--commit-msg-file', msgfile])
+spec = importlib.util.find_spec('commitizen')
+if spec is None:
+    print('[commit-msg] commitizen 未安装，跳过严格校验。建议: pip install commitizen')
     sys.exit(0)
-except FileNotFoundError:
-    pass
-except subprocess.CalledProcessError as e:
-    sys.exit(e.returncode)
 
-print('[commit-msg] commitizen 未安装，跳过严格校验。建议: pip install commitizen')
-sys.exit(0)
+rc = subprocess.call([sys.executable, '-m', 'commitizen', 'check', '--commit-msg-file', msgfile])
+sys.exit(rc)
 PY
 
