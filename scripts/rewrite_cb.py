@@ -10,14 +10,31 @@ FIRST_LINE_OK = re.compile(
     re.IGNORECASE,
 )
 
+CAPTURED = re.compile(
+    rf"^(?P<type>{ALLOWED_TYPES})(?:\\((?P<scope>[^)]+)\\))?: (?P<subject>.*?) \\| EN: (?P<en>.*)",
+    re.IGNORECASE,
+)
+
 
 def _normalize_message_text(text: str) -> str:
     lines = text.splitlines()
     subject = (lines[0] if lines else "").strip()
     body = "\n".join(lines[1:]).strip()
 
-    if FIRST_LINE_OK.match(subject):
-        return text
+    m = CAPTURED.match(subject)
+    if m:
+        # Reconstruct to avoid duplicates and normalize spacing/casing
+        t = m.group('type').lower()
+        scope = m.group('scope')
+        subj = m.group('subject').strip()
+        en = m.group('en').strip()
+        head = f"{t}"
+        if scope:
+            head += f"({scope})"
+        head += f": {subj} | EN: {en}"
+        if body:
+            return head + "\n\n" + body
+        return head
 
     # Default to chore when type is missing/unknown; preserve original subject
     header = f"chore: {subject} | EN: update"
