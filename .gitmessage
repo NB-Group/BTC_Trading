@@ -1,0 +1,21 @@
+类型(范围可选): 简短主题 | EN: short english
+
+变更动机/背景（可选，中文优先）：
+
+详细说明（可选）：
+
+关联问题（可选）：
+
+BREAKING CHANGE（如有）：
+
+# 规范说明
+# - 中文优先，后接 "| EN: ..." 的简短英文
+# - 类型：feat, fix, chore, docs, refactor, perf, test, ci, build, revert
+# - 范围可选：如 feat(trader):
+# - 主题不以句号结尾，尽量 50 字以内
+
+# 示例
+# feat(decision): 新增 VLM 趋势信号融合 | EN: add VLM signal fusion
+# fix(execution): 修复平仓失败的边界条件 | EN: fix close position edge case
+# chore: 更新依赖与脚本 | EN: update deps and scripts
+
