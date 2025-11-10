@@ -4,6 +4,8 @@ import numpy as np
 from pyecharts import options as opts
 from pyecharts.charts import Kline, Line, Grid
 from pyecharts.globals import ThemeType
+from btc_predictor.data import get_data
+import config
 
 # 假设历史数据文件路径
 SAVE_DIR = 'cache/ma60_cross_samples'
@@ -12,24 +14,17 @@ NUM_SAMPLES = 20  # 扩充生成数量
 
 os.makedirs(SAVE_DIR, exist_ok=True)
 
-import numpy as np
-from pyecharts import options as opts
-from pyecharts.charts import Kline, Line, Grid
-from pyecharts.globals import ThemeType
-
-# 使用项目内数据获取方法
-from btc_predictor.data import get_data
-
-SAVE_DIR = 'cache/ma60_cross_samples'
-WINDOW = 60  # 每张图展示的K线数量（前后各30根）
-NUM_SAMPLES = 20
-
-os.makedirs(SAVE_DIR, exist_ok=True)
-
 
 def load_data():
-    # 获取BTC/USDT 1小时K线，指定since参数，获取更长历史数据
-    df = get_data('BTC/USDT', '1h', since="2023-01-01T00:00:00Z")
+    # 从配置中读取主交易对
+    main_symbols = config.FUTURES.get('trade_symbols', [])
+    if not main_symbols:
+        raise ValueError("配置文件中未设置主攻交易对 'trade_symbols'")
+    primary_symbol = main_symbols[0]
+    # 转换为 ccxt 格式: SOL-USDT-SWAP -> SOL/USDT
+    ccxt_symbol = primary_symbol.replace('-SWAP', '').replace('-', '/')
+    # 获取主交易对 1小时K线，指定since参数，获取更长历史数据
+    df = get_data(ccxt_symbol, '1h', since="2023-01-01T00:00:00Z")
     return df
 
 def find_ma60_cross(df):

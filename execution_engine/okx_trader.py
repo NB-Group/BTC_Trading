@@ -184,20 +184,45 @@ class OKXTrader:
                 except Exception as e:
                     LOGGER.warning(f"[{symbol}] 获取最大可开张数失败: {e}")
                 if max_amount is None:
-                    # fallback: 手动计算最大可开张数
+                    # fallback: 手动计算最大可开张数（基于合约面值USD）
                     try:
                         avail_eq = self.get_balance('USDT')
                         if avail_eq <= 0:
                             LOGGER.error(f"[{symbol}] 可用保证金为0，无法下单。")
                             return
+                        market = self.exchange.market(symbol)
                         ticker = self.exchange.fetch_ticker(symbol)
                         current_price = float(ticker['last'])
-                        # TODO: 不同币种的合约面值可能不同，需要配置化
-                        contract_value = 100  # BTC-USDT-SWAP 一张=100美元名义价值
-                        max_amount = int(avail_eq * leverage / (contract_value * current_price / 100))
+                        # 优先使用OKX市场元数据中的面值信息
+                        info = market.get('info', {}) if isinstance(market, dict) else {}
+                        ct_val = info.get('ctVal')  # 面值
+                        ct_val_ccy = info.get('ctValCcy')  # 面值计价币种，常见为 'USD'
+                        contract_value_usd = None
+                        try:
+                            if ct_val is not None:
+                                ct_val = float(ct_val)
+                                if ct_val_ccy == 'USD':
+                                    contract_value_usd = ct_val
+                                elif ct_val_ccy and ct_val_ccy.upper() in ('BTC', 'ETH'):
+                                    # 面值以币计价，换算为USD
+                                    contract_value_usd = ct_val * current_price
+                        except Exception:
+                            contract_value_usd = None
+                        # 兜底：按常见面值
+                        if not contract_value_usd:
+                            # OKX 线性合约常见面值：BTC=100 USD，ETH=10 USD
+                            symbol_key = symbol.upper()
+                            if symbol_key.startswith('BTC-'):
+                                contract_value_usd = 100.0
+                            elif symbol_key.startswith('ETH-'):
+                                contract_value_usd = 10.0
+                            else:
+                                contract_value_usd = 100.0
+                        # 计算最大张数：可用保证金 * 杠杆 / 每张名义USD
+                        max_amount = int((avail_eq * leverage) / contract_value_usd)
                         if max_amount < 1:
                             max_amount = 1
-                        LOGGER.info(f"[{symbol}] 手动计算最大可开张数: availEq={avail_eq}, 杠杆={leverage}, 现价={current_price}, 合约面值={contract_value}，最大可开张数={max_amount}")
+                        LOGGER.info(f"[{symbol}] 手动计算最大可开张数: availEq={avail_eq}, 杠杆={leverage}, 面值(USD)={contract_value_usd}，最大可开张数={max_amount}")
                     except Exception as e:
                         LOGGER.error(f"[{symbol}] 手动计算最大可开张数失败: {e}")
                         return
@@ -209,7 +234,7 @@ class OKXTrader:
                 side = 'buy' if decision == 'LONG' else 'sell'
                 pos_side = 'long' if decision == 'LONG' else 'short'
                 
-                LOGGER.info(f"[{symbol}] 准备开新仓: {decision} 保证金 {amount} USDT (杠杆: {leverage}x)...")
+                LOGGER.info(f"[{symbol}] 准备开新仓: {decision} 数量 {amount} 张 (杠杆: {leverage}x)...")
                 
                 # 创建市价单
                 order_params = {'tdMode': self.margin_mode}
@@ -465,7 +490,8 @@ class OKXTrader:
                         'tdMode': self.margin_mode,
                         'triggerPrice': stop_loss_price,
                         'orderType': 'market',  # 触发后市价
-                        'orderPx': '',  # 市价计划委托必须传递orderPx字段
+                            # OKX 要求市价计划委托传递 orderPx='-1'，否则报 "orderPx can not be empty"
+                            'orderPx': '-1',
                     }
                     if self.hedge_mode:
                         stop_order_params['posSide'] = pos_side

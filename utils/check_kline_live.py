@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from btc_predictor.data import get_data
 from btc_predictor.features import create_features
+import config
 
 def check_kline_with_features(df: pd.DataFrame):
     print(f"原始数据行数: {len(df)}")
@@ -76,5 +77,12 @@ def check_kline_with_features(df: pd.DataFrame):
         return df
 
 if __name__ == "__main__":
-    df = get_data(symbol='BTC/USDT', timeframe='1h', limit=200)
+    # 从配置中读取主交易对
+    main_symbols = config.FUTURES.get('trade_symbols', [])
+    if not main_symbols:
+        raise ValueError("配置文件中未设置主攻交易对 'trade_symbols'")
+    primary_symbol = main_symbols[0]
+    # 转换为 ccxt 格式: SOL-USDT-SWAP -> SOL/USDT
+    ccxt_symbol = primary_symbol.replace('-SWAP', '').replace('-', '/')
+    df = get_data(symbol=ccxt_symbol, timeframe='1h', limit=200)
     df_final = check_kline_with_features(df)
