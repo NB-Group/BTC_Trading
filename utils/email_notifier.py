@@ -19,8 +19,14 @@ class EmailNotifier:
             return
             
         # 验证配置
-        required_fields = ['smtp_server', 'smtp_port', 'from_email', 'to_email', 'auth_code']
+        required_fields = ['smtp_server', 'smtp_port', 'from_email', 'auth_code']
         missing_fields = [field for field in required_fields if not self.config.get(field)]
+
+        to_emails = self.config.get('to_emails') or []
+        if not to_emails:
+            missing_fields.append('to_emails')
+        else:
+            self.config['to_emails'] = to_emails
         
         if missing_fields:
             LOGGER.warning(f"邮件配置不完整，缺少字段: {missing_fields}")
@@ -628,7 +634,8 @@ class EmailNotifier:
             msg = MIMEMultipart('alternative')
             msg['Subject'] = subject
             msg['From'] = self.config['from_email']
-            msg['To'] = self.config['to_email']
+            recipients = self.config.get('to_emails') or []
+            msg['To'] = ', '.join(recipients)
             
             # 添加HTML内容
             html_part = MIMEText(html_content, 'html', 'utf-8')
@@ -642,7 +649,7 @@ class EmailNotifier:
                 if self.config['use_tls']:
                     server.starttls(context=context)
                 server.login(self.config['from_email'], self.config['auth_code'])
-                server.send_message(msg)
+                server.send_message(msg, from_addr=self.config['from_email'], to_addrs=recipients)
                 
         except Exception as e:
             LOGGER.error(f"发送邮件失败: {e}")

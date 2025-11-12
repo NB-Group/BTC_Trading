@@ -2,10 +2,26 @@
 # 此文件包含整个BTC交易系统的共享设置。
 
 import os
+from typing import List
 from dotenv import load_dotenv
 
 # 从.env文件加载环境变量
 load_dotenv()
+
+
+def _parse_email_list(raw: str) -> List[str]:
+    """
+    将环境变量中的收件人字符串解析为邮件地址列表。
+    支持使用逗号、分号或换行分隔多个邮箱。
+    """
+    if not raw:
+        return []
+
+    separators = [',', ';', '\n']
+    for sep in separators[1:]:
+        raw = raw.replace(sep, separators[0])
+
+    return [email.strip() for email in raw.split(separators[0]) if email.strip()]
 
 # ----------------- 通用设置 -----------------
 # 交易设置
@@ -17,7 +33,7 @@ EMAIL_CONFIG = {
     'smtp_server': os.getenv('EMAIL_SMTP_SERVER', 'smtp.qq.com'),
     'smtp_port': int(os.getenv('EMAIL_SMTP_PORT', '587')),
     'from_email': os.getenv('EMAIL_FROM', ''),
-    'to_email': os.getenv('EMAIL_TO', ''),
+    'to_emails': _parse_email_list(os.getenv('EMAIL_TO', '')),
     'auth_code': os.getenv('EMAIL_AUTH_CODE', ''),
     'use_tls': os.getenv('EMAIL_USE_TLS', 'true').lower() == 'true'
 }
