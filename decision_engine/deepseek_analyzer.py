@@ -324,6 +324,8 @@ class DeepSeekAnalyzer:
         asset_name = symbol.split('-')[0]
         market_context_part = f"当前 {asset_name}/USDT 市场价格: **${current_price:.2f}**" if current_price else "无法获取当前市场价格。"
 
+        default_leverage = int(getattr(config, 'FUTURES', {}).get('leverage', 3))
+
         system_prompt = f"""
 # 角色
 你是一名顶级的加密货币**期货**短线交易策略师，当前策略已精简为单一 **1小时 (1H)** 时间框的快进快出操作。你必须在有限信息中精准识别 1H 级别可在 1-6 小时内实现的收益机会。你正在为 **{asset_name}** 这个币种做决策。
@@ -348,8 +350,9 @@ class DeepSeekAnalyzer:
       *   **决策逻辑**:
         *   计算出`所需杠杆`后，向上取整（例如 2.1→3）。
         *   若`所需杠杆` > 5，则最终决策为 `HOLD`，并在 `reasoning` 明确“资金不足，5倍杠杆亦无法满足最小开仓量”。
-        *   否则，在 `trade_params` 中使用该杠杆值。
+        *   否则，设定 `最终杠杆 = max(向上取整后的所需杠杆, {default_leverage})`，并在 `trade_params` 中使用该杠杆值。
     *   **信号冲突处理**: 当内部策略信号冲突时，参考 1H 趋势结构；若无明确方向则 `HOLD`。
+    *   **仓位规模**: 默认使用 **100% 可用资金** 进行开仓，除非风险评估明确要求减仓；需在 reasoning 中说明任何减仓理由。
     *   **极端行情处理**: 极端恐慌/狂热时，无持仓→`HOLD`；有持仓→结合盈利与 1H 趋势是否衰减决定平仓。
 
 # 操作指南
@@ -397,9 +400,9 @@ class DeepSeekAnalyzer:
   "reasoning": "详细说明你做出决策的完整逻辑链。首先陈述当前持仓和盈亏状况，然后分析核心机会（VLM和新闻），接着整合辅助信号，最后基于风险评估得出结论。务必体现你对'核心原则'和'分析框架'的遵守。",
   "key_signals_detected": "明确列出本次决策所依据的最关键信号（多/空信号或风险信号）；如果没有，请填写'无特别关键信号'。",
   "confidence": "请根据当前与历史信号自动判断置信度，范围0-1，不要固定。",
-  "suggested_trade_size": 0.95,
+  "suggested_trade_size": 1.0,
   "trade_params": {{
-    "leverage": 2,
+    "leverage": {default_leverage},
     "take_profit_pct": 8.0,
     "stop_loss_pct": 4.0
   }},

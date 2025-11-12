@@ -151,14 +151,16 @@ class UnifiedGeminiAnalyzer:
         market_price_text = f"${market_price:.2f}" if isinstance(market_price, (int, float)) else "未知"
 
         # 使用程序化方式构造 JSON 模板，避免 f-string 花括号转义问题
+        default_leverage = int(getattr(config, 'FUTURES', {}).get('leverage', 3))
+
         json_template = {
             "decision": "LONG/SHORT/HOLD/CLOSE_LONG/CLOSE_SHORT",
             "reasoning": "详述完整逻辑链。先述当前持仓与盈亏语义，再论证图像结构、量化与新闻，最后给出风险与参数。",
             "key_signals_detected": "列出本次决策的关键多/空/风险信号。没有则写无。",
             "confidence": 0.0,
-            "suggested_trade_size": 0.95,
+            "suggested_trade_size": 1.0,
             "trade_params": {
-                "leverage": 2,
+                "leverage": default_leverage,
                 "take_profit_pct": 8.0,
                 "stop_loss_pct": 4.0
             },
@@ -188,7 +190,8 @@ class UnifiedGeminiAnalyzer:
    - 内部量化模型矩阵出现空头/强烈动量；
    - 新闻出现突发、可信的实质性利空。
 3. **资金优先 (硬性要求)**：若开仓（LONG/SHORT），计算满足交易所**最小开仓名义价值**所需最低杠杆：
-   所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。
+   所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。否则，设定最终杠杆 = max(向上取整后的所需杠杆, {default_leverage})，写入 trade_params。
+4. **仓位规模**：默认使用 **100% 可用资金**（即 suggested_trade_size = 1.0）进行开仓，除非风险评估明确要求减仓；任何减仓需在 reasoning 中说明原因。
 
 # 输出JSON（严格JSON，不要多余文字）
 {json_template_text}
