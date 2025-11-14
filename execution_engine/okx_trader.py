@@ -228,8 +228,20 @@ class OKXTrader:
                         return
                 else:
                     LOGGER.info(f"[{symbol}] 最大可开张数: {max_amount}")
-                amount = max_amount
-                LOGGER.info(f"[{symbol}] 将用最大可开张数下单: {amount} 张, 杠杆: {leverage}x")
+                
+                # 应用 suggested_trade_size 来调整实际交易量
+                if suggested_trade_size and 0 < suggested_trade_size <= 1:
+                    amount = int(max_amount * suggested_trade_size)
+                    LOGGER.info(f"[{symbol}] 应用建议仓位比例 {suggested_trade_size:.2%}，调整后数量: {amount} 张 (最大可开: {max_amount} 张)")
+                else:
+                    amount = max_amount
+                    LOGGER.warning(f"[{symbol}] suggested_trade_size 无效 ({suggested_trade_size})，使用最大可开张数")
+                
+                if amount < 1:
+                    LOGGER.error(f"[{symbol}] 计算后的交易数量 ({amount}) 小于1张，无法下单。")
+                    return
+                
+                LOGGER.info(f"[{symbol}] 将用 {amount} 张下单 (杠杆: {leverage}x)")
                 
                 side = 'buy' if decision == 'LONG' else 'sell'
                 pos_side = 'long' if decision == 'LONG' else 'short'
@@ -486,16 +498,16 @@ class OKXTrader:
                     LOGGER.error(f"[{symbol}] stop_loss_price为None，跳过止损单下单。")
                 else:
                     # 使用OKX标准计划委托（trigger单），防止下单即成交
+                    # OKX API 要求使用 triggerPx 和 orderPx，而不是 triggerPrice
                     stop_order_params = {
                         'tdMode': self.margin_mode,
-                        'triggerPrice': stop_loss_price,
-                        'orderType': 'market',  # 触发后市价
-                            # OKX 要求市价计划委托传递 orderPx='-1'，否则报 "orderPx can not be empty"
-                            'orderPx': '-1',
+                        'triggerPx': str(stop_loss_price),  # 触发价格
+                        'ordType': 'conditional',  # 计划委托类型
+                        'orderPx': '-1',  # 市价单使用 '-1'
                     }
                     if self.hedge_mode:
                         stop_order_params['posSide'] = pos_side
-                    LOGGER.info(f"[{symbol}] 提交止损计划委托单，数量: {amount}, 类型: {type(amount)} triggerPrice={stop_loss_price}")
+                    LOGGER.info(f"[{symbol}] 提交止损计划委托单，数量: {amount}, 类型: {type(amount)} triggerPx={stop_loss_price}")
                     stop_order = self.exchange.create_order(
                         symbol=symbol,
                         type='trigger',  # 计划委托

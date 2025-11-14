@@ -25,7 +25,7 @@ def _parse_email_list(raw: str) -> List[str]:
 
 # ----------------- 通用设置 -----------------
 # 交易设置
-DEMO_MODE = os.getenv('DEMO_MODE', 'true').lower() == 'true'
+DEMO_MODE = os.getenv('DEMO_MODE', 'false').lower() == 'true'
 
 # Email Configuration
 EMAIL_CONFIG = {
