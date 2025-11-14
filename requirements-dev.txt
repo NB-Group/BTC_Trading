@@ -1,2 +1,0 @@
-commitizen~=3.28
-

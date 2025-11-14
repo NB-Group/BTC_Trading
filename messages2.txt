@@ -1,3 +1,0 @@
-update==>chore: 更新 | EN: update
-又改了点==>chore: 更新 | EN: minor tweaks
-这次更新，日后再无bug==>chore: 更新 | EN: no more bugs

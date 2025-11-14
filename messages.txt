@@ -1,5 +1,0 @@
-re:(?is)^update\s*$==>chore: 更新 | EN: update
-re:(?is)^update\b.*==>chore: 更新 | EN: update
-re:(?is)^又改了点.*==>chore: 更新 | EN: minor tweaks
-re:(?is)^这次更新，日后再无bug.*==>chore: 更新 | EN: no more bugs
-re:(?is)^v\d+\.\d+\.\d+.*==>chore(release): 版本更新 | EN: release
