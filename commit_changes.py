@@ -62,15 +62,20 @@ def main():
     run_command("git status", "查看暂存区状态")
     
     # 4. 提交更改
-    commit_message = """fix(execution): 修复可用保证金与账户总资产概念混淆 | EN: fix confusion between available margin and total equity
+    commit_message = """fix(execution): 为止盈止损单添加 reduceOnly 参数避免占用保证金 | EN: add reduceOnly parameter to stop-loss and take-profit orders to avoid margin usage
 
-- 明确区分"可用保证金"（availEq）和"账户总资产"（equity）的概念
-- 更新 get_balance() 方法文档，明确返回的是可用保证金而非账户总资产
-- 添加账户总资产的获取和日志记录，便于调试和问题排查
-- 当可用保证金为0但账户总资产不为0时，记录警告说明资金可能被用于持仓
-- 更新决策引擎提示，将"当前账户余额"改为"当前可用保证金"
-- 在杠杆计算公式中明确使用可用保证金，并添加概念澄清说明
-- 改进错误信息，明确说明可用保证金为0不等于账户总资产为0"""
+- 在止损计划委托单中添加 reduceOnly=True，避免占用额外保证金
+- 在止盈限价单中添加 reduceOnly=True，避免占用额外保证金
+- 更新撤销止盈止损单的逻辑，正确识别和撤销带有 reduceOnly 的订单
+- 添加中英对照注释，说明 reduceOnly 参数的作用
+- 修复因止盈止损单占用保证金导致的可用保证金不足问题
+
+Changes:
+- Add reduceOnly=True to stop-loss trigger orders to avoid additional margin usage
+- Add reduceOnly=True to take-profit limit orders to avoid additional margin usage
+- Update cancel logic to correctly identify and cancel reduceOnly orders
+- Add bilingual comments explaining the reduceOnly parameter
+- Fix insufficient available margin issue caused by stop-loss/take-profit orders using margin"""
     
     print("\n[信息] 提交更改...")
     # 将提交信息写入临时文件，避免命令行编码问题

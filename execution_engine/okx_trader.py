@@ -555,21 +555,28 @@ class OKXTrader:
         """
         try:
             # 先撤销未成交止盈止损单
+            # Cancel pending stop-loss and take-profit orders first
+            # 注意：现在止盈止损单都设置了 reduceOnly=True，所以需要撤销所有本方向的止盈止损单
+            # Note: Stop-loss and take-profit orders now have reduceOnly=True, so need to cancel all orders in this direction
             open_orders = self.exchange.fetch_open_orders(symbol=symbol)
             for o in open_orders:
-                # 只撤销本方向的止盈止损单（不撤reduceOnly的平仓单）
+                # 撤销本方向的止盈止损单（包括 reduceOnly 的止盈止损单）
+                # Cancel stop-loss and take-profit orders in this direction (including reduceOnly orders)
                 o_type = o.get('type')
                 o_params = o.get('info', {})
                 o_pos_side = o_params.get('posSide') if self.hedge_mode else pos_side
-                reduce_only = o_params.get('reduceOnly', False)
-                # OKX止损单type为'stop'，止盈单type为'limit'但带止盈价，且都不是reduceOnly
-                if o.get('status') in ('open', 'new') and o_pos_side == pos_side and not reduce_only:
-                    if o_type in ('stop', 'trigger', 'conditional') or (o_type == 'limit' and ('takeProfit' in o_params or 'tpTriggerPx' in o_params)):
-                        try:
-                            self.exchange.cancel_order(o['id'], symbol=symbol)
-                            LOGGER.info(f"[{symbol}] 已撤销未成交止盈止损单: {o['id']} {o_type} {o_pos_side}")
-                        except Exception as ce:
-                            LOGGER.warning(f"[{symbol}] 撤销止盈止损单失败: {o['id']} {ce}")
+                # OKX止损单type为'stop'或'trigger'，止盈单type为'limit'但带止盈价
+                # OKX stop-loss orders have type 'stop' or 'trigger', take-profit orders have type 'limit' with take-profit price
+                # 现在止盈止损单都设置了 reduceOnly=True，所以需要检查本方向的所有止盈止损单
+                # Now all stop-loss and take-profit orders have reduceOnly=True, so need to check all orders in this direction
+                is_stop_loss = o_type in ('stop', 'trigger', 'conditional')
+                is_take_profit = o_type == 'limit' and ('takeProfit' in o_params or 'tpTriggerPx' in o_params)
+                if o.get('status') in ('open', 'new') and o_pos_side == pos_side and (is_stop_loss or is_take_profit):
+                    try:
+                        self.exchange.cancel_order(o['id'], symbol=symbol)
+                        LOGGER.info(f"[{symbol}] 已撤销未成交止盈止损单: {o['id']} {o_type} {o_pos_side} (reduceOnly={o_params.get('reduceOnly', False)})")
+                    except Exception as ce:
+                        LOGGER.warning(f"[{symbol}] 撤销止盈止损单失败: {o['id']} {ce}")
         except Exception as e:
             LOGGER.warning(f"[{symbol}] 获取/撤销未成交止盈止损单时出错: {e}")
         """
@@ -629,12 +636,16 @@ class OKXTrader:
                 else:
                     # 使用OKX标准计划委托（trigger单），防止下单即成交
                     # CCXT 使用 triggerPrice 和 orderType，会自动转换为 OKX API 参数
+                    # 设置 reduceOnly=True 避免占用保证金（只用于平仓，不占用额外保证金）
+                    # Set reduceOnly=True to avoid margin usage (only for closing positions, no additional margin required)
                     stop_order_params = {
                         'tdMode': self.margin_mode,
-                        'triggerPrice': stop_loss_price,  # 触发价格（CCXT标准参数）
-                        'orderType': 'market',  # 触发后市价
+                        'triggerPrice': stop_loss_price,  # 触发价格（CCXT标准参数）| Trigger price (CCXT standard parameter)
+                        'orderType': 'market',  # 触发后市价 | Market order after trigger
                         # OKX 要求市价计划委托传递 orderPx='-1'，否则报 "orderPx can not be empty"
+                        # OKX requires orderPx='-1' for market trigger orders, otherwise "orderPx can not be empty" error
                         'orderPx': '-1',
+                        'reduceOnly': True,  # 只用于平仓，不占用保证金 | Only for closing positions, no margin usage
                     }
                     if self.hedge_mode:
                         stop_order_params['posSide'] = pos_side
@@ -684,8 +695,11 @@ class OKXTrader:
                 if take_profit_price is None:
                     LOGGER.error(f"[{symbol}] take_profit_price为None，跳过止盈单下单。")
                 else:
+                    # 设置 reduceOnly=True 避免占用保证金（只用于平仓，不占用额外保证金）
+                    # Set reduceOnly=True to avoid margin usage (only for closing positions, no additional margin required)
                     take_profit_order_params = {
-                        'tdMode': self.margin_mode
+                        'tdMode': self.margin_mode,
+                        'reduceOnly': True,  # 只用于平仓，不占用保证金 | Only for closing positions, no margin usage
                     }
                     if self.hedge_mode:
                         take_profit_order_params['posSide'] = pos_side
