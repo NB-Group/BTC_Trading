@@ -259,28 +259,49 @@ class OKXTrader:
                 order_params = {'tdMode': self.margin_mode}
                 if self.hedge_mode:
                     order_params['posSide'] = pos_side
-                order = self.exchange.create_order(
-                    symbol=symbol,
-                    type='market',
-                    side=side,
-                    amount=amount,
-                    params=order_params
-                )
+                
+                # 记录下单参数
+                LOGGER.info(f"[{symbol}] 开仓下单参数: symbol={symbol}, type=market, side={side}, amount={amount}, params={order_params}")
+                
+                try:
+                    order = self.exchange.create_order(
+                        symbol=symbol,
+                        type='market',
+                        side=side,
+                        amount=amount,
+                        params=order_params
+                    )
+                except ccxt.ExchangeError as e:
+                    error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
+                    if hasattr(e, 'response') and e.response:
+                        error_detail += f", 响应: {e.response}"
+                    LOGGER.error(f"[{symbol}] 开仓下单失败，{error_detail}")
+                    raise RuntimeError(f"开仓下单失败: {error_detail}") from e
+                except ccxt.NetworkError as e:
+                    error_detail = f"网络错误: {type(e).__name__}: {str(e)}"
+                    LOGGER.error(f"[{symbol}] 开仓下单失败，{error_detail}")
+                    raise RuntimeError(f"开仓下单失败: {error_detail}") from e
+                except Exception as e:
+                    error_detail = f"未知错误: {type(e).__name__}: {str(e)}"
+                    LOGGER.error(f"[{symbol}] 开仓下单失败，{error_detail}", exc_info=True)
+                    raise RuntimeError(f"开仓下单失败: {error_detail}") from e
+                
                 # 检查返回值的类型和内容
+                LOGGER.debug(f"[{symbol}] create_order 返回类型: {type(order)}, 内容: {order}")
                 if not isinstance(order, dict):
                     error_detail = f"create_order 返回了非字典类型: {type(order).__name__}, 值: {repr(order)}"
-                    LOGGER.error(f"[{symbol}] 下单失败，{error_detail}")
-                    raise RuntimeError(f"下单失败: {error_detail}")
+                    LOGGER.error(f"[{symbol}] 开仓下单失败，{error_detail}")
+                    raise RuntimeError(f"开仓下单失败: {error_detail}")
                 if 'code' in order:
                     error_code = order.get('code', 'UNKNOWN')
                     error_msg = order.get('msg', order.get('message', str(order)))
-                    error_detail = f"code: {error_code}, msg: {error_msg}"
-                    LOGGER.error(f"[{symbol}] 下单失败，返回错误: {error_detail}")
-                    raise RuntimeError(f"下单失败: {error_detail}")
+                    error_detail = f"code: {error_code}, msg: {error_msg}, 完整响应: {order}"
+                    LOGGER.error(f"[{symbol}] 开仓下单失败，返回错误: {error_detail}")
+                    raise RuntimeError(f"开仓下单失败: {error_detail}")
                 if 'id' not in order:
                     error_detail = f"create_order 返回的字典中缺少 'id' 字段: {order}"
-                    LOGGER.error(f"[{symbol}] 下单失败，{error_detail}")
-                    raise RuntimeError(f"下单失败: {error_detail}")
+                    LOGGER.error(f"[{symbol}] 开仓下单失败，{error_detail}")
+                    raise RuntimeError(f"开仓下单失败: {error_detail}")
                 LOGGER.success(f"[{symbol}] 开仓 ({decision}) 订单已成功提交，订单ID: {order.get('id', 'N/A')}")
                 
                 # --- [学习闭环] 记录开仓信息 ---
@@ -380,14 +401,44 @@ class OKXTrader:
                 order_params = {'tdMode': self.margin_mode, 'reduceOnly': True}
                 if self.hedge_mode:
                     order_params['posSide'] = current_pos_side
-                order = self.exchange.create_order(
-                    symbol=symbol,
-                    type='market',
-                    side=side,
-                    amount=amount,
-                    params=order_params
-                )
+                
+                # 记录下单参数
+                LOGGER.info(f"[{symbol}] 平仓下单参数: symbol={symbol}, type=market, side={side}, amount={amount}, params={order_params}")
+                
+                try:
+                    order = self.exchange.create_order(
+                        symbol=symbol,
+                        type='market',
+                        side=side,
+                        amount=amount,
+                        params=order_params
+                    )
+                except ccxt.ExchangeError as e:
+                    error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
+                    if hasattr(e, 'response') and e.response:
+                        error_detail += f", 响应: {e.response}"
+                    LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}")
+                    # 如果平仓失败，把进行中的交易信息加回去
+                    if entry_trade_info:
+                        self._ongoing_trades[symbol] = entry_trade_info
+                    raise RuntimeError(f"平仓下单失败: {error_detail}") from e
+                except ccxt.NetworkError as e:
+                    error_detail = f"网络错误: {type(e).__name__}: {str(e)}"
+                    LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}")
+                    # 如果平仓失败，把进行中的交易信息加回去
+                    if entry_trade_info:
+                        self._ongoing_trades[symbol] = entry_trade_info
+                    raise RuntimeError(f"平仓下单失败: {error_detail}") from e
+                except Exception as e:
+                    error_detail = f"未知错误: {type(e).__name__}: {str(e)}"
+                    LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}", exc_info=True)
+                    # 如果平仓失败，把进行中的交易信息加回去
+                    if entry_trade_info:
+                        self._ongoing_trades[symbol] = entry_trade_info
+                    raise RuntimeError(f"平仓下单失败: {error_detail}") from e
+                
                 # 检查返回值的类型和内容
+                LOGGER.debug(f"[{symbol}] create_order 返回类型: {type(order)}, 内容: {order}")
                 if not isinstance(order, dict):
                     error_detail = f"create_order 返回了非字典类型: {type(order).__name__}, 值: {repr(order)}"
                     LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}")
@@ -398,7 +449,7 @@ class OKXTrader:
                 if 'code' in order:
                     error_code = order.get('code', 'UNKNOWN')
                     error_msg = order.get('msg', order.get('message', str(order)))
-                    error_detail = f"code: {error_code}, msg: {error_msg}"
+                    error_detail = f"code: {error_code}, msg: {error_msg}, 完整响应: {order}"
                     LOGGER.error(f"[{symbol}] 平仓下单失败，返回错误: {error_detail}")
                     # 如果平仓失败，把进行中的交易信息加回去
                     if entry_trade_info:
@@ -546,14 +597,31 @@ class OKXTrader:
                     if self.hedge_mode:
                         stop_order_params['posSide'] = pos_side
                     LOGGER.info(f"[{symbol}] 提交止损计划委托单，数量: {amount}, 类型: {type(amount)} triggerPrice={stop_loss_price}")
-                    stop_order = self.exchange.create_order(
-                        symbol=symbol,
-                        type='trigger',  # 计划委托
-                        side='sell' if pos_side == 'long' else 'buy',
-                        amount=amount,
-                        params=stop_order_params
-                    )
+                    try:
+                        stop_order = self.exchange.create_order(
+                            symbol=symbol,
+                            type='trigger',  # 计划委托
+                            side='sell' if pos_side == 'long' else 'buy',
+                            amount=amount,
+                            params=stop_order_params
+                        )
+                    except ccxt.ExchangeError as e:
+                        error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
+                        if hasattr(e, 'response') and e.response:
+                            error_detail += f", 响应: {e.response}"
+                        LOGGER.error(f"[{symbol}] 止损单下单失败，{error_detail}")
+                        raise RuntimeError(f"止损单下单失败: {error_detail}") from e
+                    except ccxt.NetworkError as e:
+                        error_detail = f"网络错误: {type(e).__name__}: {str(e)}"
+                        LOGGER.error(f"[{symbol}] 止损单下单失败，{error_detail}")
+                        raise RuntimeError(f"止损单下单失败: {error_detail}") from e
+                    except Exception as e:
+                        error_detail = f"未知错误: {type(e).__name__}: {str(e)}"
+                        LOGGER.error(f"[{symbol}] 止损单下单失败，{error_detail}", exc_info=True)
+                        raise RuntimeError(f"止损单下单失败: {error_detail}") from e
+                    
                     # 检查返回值的类型和内容
+                    LOGGER.debug(f"[{symbol}] 止损单 create_order 返回类型: {type(stop_order)}, 内容: {stop_order}")
                     if not isinstance(stop_order, dict):
                         error_detail = f"create_order 返回了非字典类型: {type(stop_order).__name__}, 值: {repr(stop_order)}"
                         LOGGER.error(f"[{symbol}] 止损单下单失败，{error_detail}")
@@ -561,7 +629,7 @@ class OKXTrader:
                     if 'code' in stop_order:
                         error_code = stop_order.get('code', 'UNKNOWN')
                         error_msg = stop_order.get('msg', stop_order.get('message', str(stop_order)))
-                        error_detail = f"code: {error_code}, msg: {error_msg}"
+                        error_detail = f"code: {error_code}, msg: {error_msg}, 完整响应: {stop_order}"
                         LOGGER.error(f"[{symbol}] 止损单下单失败，返回错误: {error_detail}")
                         raise RuntimeError(f"止损单下单失败: {error_detail}")
                     LOGGER.info(f"[{symbol}] 止损计划委托已设置: 触发价 ${stop_loss_price:.2f}")
@@ -579,16 +647,33 @@ class OKXTrader:
                     }
                     if self.hedge_mode:
                         take_profit_order_params['posSide'] = pos_side
-                    LOGGER.info(f"[{symbol}] 提交止盈单，数量: {amount}, 类型: {type(amount)}")
-                    take_profit_order = self.exchange.create_order(
-                        symbol=symbol,
-                        type='limit',
-                        side='sell' if pos_side == 'long' else 'buy',
-                        amount=amount,
-                        price=take_profit_price,
-                        params=take_profit_order_params
-                    )
+                    LOGGER.info(f"[{symbol}] 提交止盈单，数量: {amount}, 类型: {type(amount)}, price={take_profit_price}")
+                    try:
+                        take_profit_order = self.exchange.create_order(
+                            symbol=symbol,
+                            type='limit',
+                            side='sell' if pos_side == 'long' else 'buy',
+                            amount=amount,
+                            price=take_profit_price,
+                            params=take_profit_order_params
+                        )
+                    except ccxt.ExchangeError as e:
+                        error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
+                        if hasattr(e, 'response') and e.response:
+                            error_detail += f", 响应: {e.response}"
+                        LOGGER.error(f"[{symbol}] 止盈单下单失败，{error_detail}")
+                        raise RuntimeError(f"止盈单下单失败: {error_detail}") from e
+                    except ccxt.NetworkError as e:
+                        error_detail = f"网络错误: {type(e).__name__}: {str(e)}"
+                        LOGGER.error(f"[{symbol}] 止盈单下单失败，{error_detail}")
+                        raise RuntimeError(f"止盈单下单失败: {error_detail}") from e
+                    except Exception as e:
+                        error_detail = f"未知错误: {type(e).__name__}: {str(e)}"
+                        LOGGER.error(f"[{symbol}] 止盈单下单失败，{error_detail}", exc_info=True)
+                        raise RuntimeError(f"止盈单下单失败: {error_detail}") from e
+                    
                     # 检查返回值的类型和内容
+                    LOGGER.debug(f"[{symbol}] 止盈单 create_order 返回类型: {type(take_profit_order)}, 内容: {take_profit_order}")
                     if not isinstance(take_profit_order, dict):
                         error_detail = f"create_order 返回了非字典类型: {type(take_profit_order).__name__}, 值: {repr(take_profit_order)}"
                         LOGGER.error(f"[{symbol}] 止盈单下单失败，{error_detail}")
@@ -596,7 +681,7 @@ class OKXTrader:
                     if 'code' in take_profit_order:
                         error_code = take_profit_order.get('code', 'UNKNOWN')
                         error_msg = take_profit_order.get('msg', take_profit_order.get('message', str(take_profit_order)))
-                        error_detail = f"code: {error_code}, msg: {error_msg}"
+                        error_detail = f"code: {error_code}, msg: {error_msg}, 完整响应: {take_profit_order}"
                         LOGGER.error(f"[{symbol}] 止盈单下单失败，返回错误: {error_detail}")
                         raise RuntimeError(f"止盈单下单失败: {error_detail}")
                     LOGGER.info(f"[{symbol}] 止盈订单已设置: 价格 ${take_profit_price:.2f}")

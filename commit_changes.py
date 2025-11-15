@@ -31,13 +31,13 @@ def run_command(cmd, description):
             print(result.stderr, file=sys.stderr)
         
         if result.returncode != 0:
-            print(f"❌ 命令执行失败，返回码: {result.returncode}")
+            print(f"[错误] 命令执行失败，返回码: {result.returncode}")
             return False
         else:
-            print(f"✅ 命令执行成功")
+            print(f"[成功] 命令执行成功")
             return True
     except Exception as e:
-        print(f"❌ 执行命令时出错: {e}")
+        print(f"[错误] 执行命令时出错: {e}")
         return False
 
 def main():
@@ -48,60 +48,37 @@ def main():
     
     # 1. 检查 git 状态
     if not run_command("git status", "检查 Git 状态"):
-        print("❌ Git 状态检查失败，请确保在 Git 仓库中")
+        print("[错误] Git 状态检查失败，请确保在 Git 仓库中")
         return
     
     # 2. 添加修改的文件
-    print("\n📝 添加修改的文件...")
+    print("\n[信息] 添加修改的文件...")
     files_to_add = [
         "execution_engine/okx_trader.py",
-        "scripts/fix_commit_messages.py"
+        "commit_changes.py"
     ]
     
     for file in files_to_add:
         if os.path.exists(file):
             if not run_command(f'git add "{file}"', f"添加文件: {file}"):
-                print(f"⚠️  警告: 添加文件 {file} 失败")
+                print(f"[警告] 添加文件 {file} 失败")
         else:
-            print(f"⚠️  文件不存在，跳过: {file}")
-    
-    # 3. 添加删除的文件
-    print("\n🗑️  处理删除的文件...")
-    deleted_files = [
-        "messages.txt",
-        "messages2.txt",
-        "requirements-dev.txt"
-    ]
-    
-    for file in deleted_files:
-        if run_command(f'git rm "{file}"', f"删除文件: {file}"):
-            print(f"✅ 已标记删除: {file}")
-        else:
-            print(f"⚠️  文件可能已不存在: {file}")
-    
-    # 4. 添加新文件（如果有）
-    new_files = [
-        "scripts/fix_bad_commit_messages.py"
-    ]
-    
-    for file in new_files:
-        if os.path.exists(file):
-            if not run_command(f'git add "{file}"', f"添加新文件: {file}"):
-                print(f"⚠️  警告: 添加新文件 {file} 失败")
+            print(f"[警告] 文件不存在，跳过: {file}")
     
     # 5. 检查暂存区状态
-    print("\n📋 检查暂存区状态...")
+    print("\n[信息] 检查暂存区状态...")
     run_command("git status", "查看暂存区状态")
     
     # 6. 提交更改
-    commit_message = """fix: 修复止损单参数和优化仓位计算逻辑
+    commit_message = """feat: 增强交易订单错误处理和日志记录
 
-- 修复止损单参数：使用 CCXT 标准参数 triggerPrice 和 orderType
-- 优化仓位计算：添加详细的日志输出，改进 suggested_trade_size 的处理逻辑
-- 支持 suggested_trade_size > 1 的情况（视为张数）
-- 添加仓位计算的详细日志，便于调试和排查问题"""
+- 为所有 create_order 调用添加完整的异常捕获（ExchangeError、NetworkError）
+- 改进错误信息格式，包含异常类型、消息和完整响应
+- 添加详细的调试日志，记录下单参数和返回值
+- 覆盖所有下单场景：开仓、平仓、止损单、止盈单
+- 使用异常链（from e）保留原始异常信息，便于问题排查"""
     
-    print("\n💾 提交更改...")
+    print("\n[信息] 提交更改...")
     # 将提交信息写入临时文件，避免命令行编码问题
     import tempfile
     with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', suffix='.txt', delete=False, newline='\n') as f:
@@ -118,11 +95,11 @@ def main():
         
         if success:
             print("\n" + "="*60)
-            print("✅ 提交成功！")
+            print("[成功] 提交成功！")
             print("="*60)
         else:
             print("\n" + "="*60)
-            print("❌ 提交失败，请检查错误信息")
+            print("[错误] 提交失败，请检查错误信息")
             print("="*60)
     finally:
         # 清理临时文件
