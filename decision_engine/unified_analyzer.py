@@ -139,13 +139,18 @@ class UnifiedGeminiAnalyzer:
             position_text += f"- **开仓均价**: ${avg_price}\n"
             position_text += f"- **杠杆倍数**: {leverage}x\n"
 
-        balance_text = "## 2. 当前账户余额\n\n"
+        balance_text = "## 2. 当前可用保证金\n\n"
         if current_balance is not None:
-            balance_text += f"当前账户余额: **${current_balance:.2f} USDT**\n可用于交易的资金: **${current_balance * 0.95:.2f} USDT** (95%)\n"
+            balance_text += f"当前可用保证金: **${current_balance:.2f} USDT**\n可用于交易的资金: **${current_balance * 0.95:.2f} USDT** (95%)\n"
+            balance_text += "\n**重要概念澄清**：\n"
+            balance_text += "- **可用保证金**（availEq）：可用于开新仓的资金\n"
+            balance_text += "- **账户总资产**（equity）：账户总价值（包含持仓价值）\n"
+            balance_text += "- **关键区别**：可用保证金为0 ≠ 账户总资产为0\n"
+            balance_text += "- 如果所有资金都被用于持仓，可用保证金可能为0，但账户总资产（包含持仓价值）可能不为0\n"
             if current_balance <= 0:
-                balance_text += "\n**重要说明**: 账户余额为0时，**开仓操作（LONG/SHORT）无法执行**，但**平仓操作（CLOSE_LONG/CLOSE_SHORT）不受影响，可以正常执行**。平仓是减少持仓，不需要可用资金。\n"
+                balance_text += "\n**当前状态**：可用保证金为0，**开仓操作（LONG/SHORT）无法执行**，但**平仓操作（CLOSE_LONG/CLOSE_SHORT）不受影响，可以正常执行**。平仓是减少持仓，不需要可用保证金。\n"
         else:
-            balance_text += "无法获取当前账户余额信息。\n"
+            balance_text += "无法获取当前可用保证金信息。\n"
 
         qs_text = self._format_quant_signals(quant_signals)
         news_text = self._format_news(twitter_data)
@@ -192,7 +197,8 @@ class UnifiedGeminiAnalyzer:
    - 内部量化模型矩阵出现空头/强烈动量；
    - 新闻出现突发、可信的实质性利空。
 3. **资金优先 (硬性要求)**：若开仓（LONG/SHORT），计算满足交易所**最小开仓名义价值**所需最低杠杆：
-   所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。否则，设定最终杠杆 = max(向上取整后的所需杠杆, {default_leverage})，写入 trade_params。
+   所需杠杆 = (最小开仓名义价值) / (当前可用保证金 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。否则，设定最终杠杆 = max(向上取整后的所需杠杆, {default_leverage})，写入 trade_params。
+   注意：这里使用的是"可用保证金"（availEq），不是"账户总资产"。可用保证金为0时无法开新仓。
 4. **仓位规模**：默认使用 **100% 可用资金**（即 suggested_trade_size = 1.0）进行开仓，除非风险评估明确要求减仓；任何减仓需在 reasoning 中说明原因。
 
 # 输出JSON（严格JSON，不要多余文字）

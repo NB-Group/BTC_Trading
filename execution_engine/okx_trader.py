@@ -188,7 +188,8 @@ class OKXTrader:
                     try:
                         avail_eq = self.get_balance('USDT')
                         if avail_eq <= 0:
-                            LOGGER.error(f"[{symbol}] 可用保证金为0，无法下单。")
+                            LOGGER.error(f"[{symbol}] 可用保证金为0，无法开新仓。")
+                            LOGGER.warning(f"[{symbol}] 注意：可用保证金为0不等于账户总资产为0，可能是资金被用于持仓。如需开仓，请先平仓释放保证金。")
                             return
                         market = self.exchange.market(symbol)
                         ticker = self.exchange.fetch_ticker(symbol)
@@ -398,6 +399,8 @@ class OKXTrader:
                         return
                     LOGGER.info(f"[{symbol}] 准备平仓: {decision} {amount}张 (约{btc_amount})...")
                 side = 'sell' if current_pos_side == 'long' else 'buy'
+                # 平仓时使用 reduceOnly，但保留 tdMode（OKX API 要求）
+                # 注意：即使设置了 reduceOnly，如果账户余额不足，OKX 仍可能拒绝平仓
                 order_params = {'tdMode': self.margin_mode, 'reduceOnly': True}
                 if self.hedge_mode:
                     order_params['posSide'] = current_pos_side
@@ -406,6 +409,7 @@ class OKXTrader:
                 LOGGER.info(f"[{symbol}] 平仓下单参数: symbol={symbol}, type=market, side={side}, amount={amount}, params={order_params}")
                 
                 try:
+                    # 首先尝试使用标准的 create_order 方法
                     order = self.exchange.create_order(
                         symbol=symbol,
                         type='market',
@@ -414,14 +418,52 @@ class OKXTrader:
                         params=order_params
                     )
                 except ccxt.ExchangeError as e:
-                    error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
+                    error_str = str(e)
+                    error_detail = f"交易所错误: {type(e).__name__}: {error_str}"
                     if hasattr(e, 'response') and e.response:
                         error_detail += f", 响应: {e.response}"
-                    LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}")
-                    # 如果平仓失败，把进行中的交易信息加回去
-                    if entry_trade_info:
-                        self._ongoing_trades[symbol] = entry_trade_info
-                    raise RuntimeError(f"平仓下单失败: {error_detail}") from e
+                    
+                    # 如果是保证金不足错误，尝试使用 close_position 方法（如果支持）
+                    if 'InsufficientFunds' in error_str or '51008' in error_str or 'insufficient' in error_str.lower():
+                        LOGGER.warning(f"[{symbol}] 平仓时遇到保证金不足错误（错误码 51008）")
+                        LOGGER.warning(f"[{symbol}] 注意：OKX 在全仓模式下，即使设置了 reduceOnly，如果账户可用余额不足，仍可能拒绝平仓")
+                        LOGGER.warning(f"[{symbol}] 这可能是因为：1) 账户可用余额为负或过低；2) 需要支付资金费用；3) 维持保证金要求")
+                        LOGGER.warning(f"[{symbol}] 尝试使用备选平仓方法...")
+                        try:
+                            # 尝试使用 close_position 方法（ccxt 可能支持）
+                            if hasattr(self.exchange, 'close_position'):
+                                close_params = {}
+                                if self.hedge_mode:
+                                    close_params['posSide'] = current_pos_side
+                                order = self.exchange.close_position(symbol, params=close_params)
+                                LOGGER.info(f"[{symbol}] 使用 close_position 方法成功平仓")
+                            else:
+                                # 如果 close_position 不支持，尝试不指定 tdMode（仅作为最后尝试）
+                                LOGGER.warning(f"[{symbol}] close_position 方法不可用，尝试移除 tdMode 参数...")
+                                fallback_params = {'reduceOnly': True}
+                                if self.hedge_mode:
+                                    fallback_params['posSide'] = current_pos_side
+                                order = self.exchange.create_order(
+                                    symbol=symbol,
+                                    type='market',
+                                    side=side,
+                                    amount=amount,
+                                    params=fallback_params
+                                )
+                                LOGGER.info(f"[{symbol}] 使用无 tdMode 参数的方法成功平仓")
+                        except Exception as fallback_e:
+                            LOGGER.error(f"[{symbol}] 备选平仓方法也失败: {fallback_e}")
+                            # 如果平仓失败，把进行中的交易信息加回去
+                            if entry_trade_info:
+                                self._ongoing_trades[symbol] = entry_trade_info
+                            raise RuntimeError(f"平仓下单失败: {error_detail}") from e
+                    else:
+                        # 其他类型的错误，直接抛出
+                        LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}")
+                        # 如果平仓失败，把进行中的交易信息加回去
+                        if entry_trade_info:
+                            self._ongoing_trades[symbol] = entry_trade_info
+                        raise RuntimeError(f"平仓下单失败: {error_detail}") from e
                 except ccxt.NetworkError as e:
                     error_detail = f"网络错误: {type(e).__name__}: {str(e)}"
                     LOGGER.error(f"[{symbol}] 平仓下单失败，{error_detail}")
@@ -691,7 +733,14 @@ class OKXTrader:
 
     def get_balance(self, currency: str = 'USDT'):
         """
-        获取指定货币的可用保证金 (available equity)。
+        获取指定货币的可用保证金 (available equity, availEq)。
+        
+        重要说明：
+        - 返回的是"可用保证金"，不是"账户总资产"
+        - 可用保证金为0 ≠ 账户总资产为0
+        - 如果所有资金都被用于持仓，可用保证金可能为0，但账户总资产（包含持仓价值）可能不为0
+        - 可用保证金为0时，无法开新仓，但可以平仓（平仓不需要可用保证金）
+        
         OKX返回的是一个包含多个币种信息的列表，我们需要找到USDT并提取'availEq'。
         """
         if self.demo_mode:
@@ -709,13 +758,20 @@ class OKXTrader:
                     if asset.get('ccy') == currency:
                         # 'availEq' 是可用作保证金的权益（以USD计价），这是最准确的指标
                         available_equity = float(asset.get('availEq', 0))
+                        # 同时获取账户总资产（equity）用于日志说明
+                        total_equity = float(asset.get('eq', 0))  # 账户总权益
+                        used_margin = float(asset.get('frozenBal', 0))  # 已冻结余额（已用保证金）
+                        
                         if available_equity > 0:
-                            LOGGER.info(f"获取到 {currency} 可用保证金 (availEq): {available_equity}")
+                            LOGGER.info(f"获取到 {currency} 可用保证金 (availEq): {available_equity}, 账户总资产 (eq): {total_equity}")
                             return available_equity
                         else:
                             # 如果availEq为0，可能是因为没有仓位，此时用可用余额availBal
                             available_balance = float(asset.get('availBal', 0))
-                            LOGGER.info(f"可用保证金为0，回退到可用余额 (availBal): {available_balance}")
+                            if available_equity == 0 and total_equity > 0:
+                                LOGGER.warning(f"可用保证金为0，但账户总资产为 {total_equity}（可能资金被用于持仓），回退到可用余额 (availBal): {available_balance}")
+                            else:
+                                LOGGER.info(f"可用保证金为0，回退到可用余额 (availBal): {available_balance}")
                             return available_balance
 
             # 如果上述路径找不到，尝试备用方案

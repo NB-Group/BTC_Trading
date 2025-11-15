@@ -346,7 +346,8 @@ class DeepSeekAnalyzer:
 
 2.  **风险管理与资金保护**:
     *   **资金优先 (硬性要求)**: 若决策为开仓（LONG/SHORT），必须计算满足交易所**最小开仓量**所需的最低杠杆。
-      *   **计算公式**: `所需杠杆 = (最小开仓名义价值) / (当前账户余额 * 0.95)`
+      *   **计算公式**: `所需杠杆 = (最小开仓名义价值) / (当前可用保证金 * 0.95)`
+      *   **注意**: 这里使用的是"可用保证金"（availEq），不是"账户总资产"。可用保证金为0时无法开新仓。
       *   **决策逻辑**:
         *   计算出`所需杠杆`后，向上取整（例如 2.1→3）。
         *   若`所需杠杆` > 5，则最终决策为 `HOLD`，并在 `reasoning` 明确“资金不足，5倍杠杆亦无法满足最小开仓量”。
@@ -504,15 +505,20 @@ class DeepSeekAnalyzer:
         return position_part
 
     def _format_balance_info(self, balance: Optional[float]) -> str:
-        """格式化当前账户余额信息。"""
-        balance_part = "## 2. 当前账户余额\n\n"
+        """格式化当前可用保证金信息。"""
+        balance_part = "## 2. 当前可用保证金\n\n"
         if balance is not None:
-            balance_part += f"当前账户余额: **${balance:.2f} USDT**\n"
+            balance_part += f"当前可用保证金: **${balance:.2f} USDT**\n"
             balance_part += f"可用于交易的资金: **${balance * 0.95:.2f} USDT** (95%)\n"
+            balance_part += "\n**重要概念澄清**：\n"
+            balance_part += "- **可用保证金**（availEq）：可用于开新仓的资金\n"
+            balance_part += "- **账户总资产**（equity）：账户总价值（包含持仓价值）\n"
+            balance_part += "- **关键区别**：可用保证金为0 ≠ 账户总资产为0\n"
+            balance_part += "- 如果所有资金都被用于持仓，可用保证金可能为0，但账户总资产（包含持仓价值）可能不为0\n"
             if balance <= 0:
-                balance_part += "\n**重要说明**: 账户余额为0时，**开仓操作（LONG/SHORT）无法执行**，但**平仓操作（CLOSE_LONG/CLOSE_SHORT）不受影响，可以正常执行**。平仓是减少持仓，不需要可用资金。\n"
+                balance_part += "\n**当前状态**：可用保证金为0，**开仓操作（LONG/SHORT）无法执行**，但**平仓操作（CLOSE_LONG/CLOSE_SHORT）不受影响，可以正常执行**。平仓是减少持仓，不需要可用保证金。\n"
         else:
-            balance_part += "无法获取当前账户余额信息。\n"
+            balance_part += "无法获取当前可用保证金信息。\n"
         return balance_part
 
     def _format_tweet(self, tweet: Dict[str, Any]) -> str:

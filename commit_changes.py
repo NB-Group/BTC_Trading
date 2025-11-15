@@ -51,32 +51,26 @@ def main():
         print("[错误] Git 状态检查失败，请确保在 Git 仓库中")
         return
     
-    # 2. 添加修改的文件
+    # 2. 添加所有修改的文件
     print("\n[信息] 添加修改的文件...")
-    files_to_add = [
-        "execution_engine/okx_trader.py",
-        "commit_changes.py"
-    ]
+    if not run_command("git add -A", "添加所有更改"):
+        print("[警告] 添加文件失败")
+        return
     
-    for file in files_to_add:
-        if os.path.exists(file):
-            if not run_command(f'git add "{file}"', f"添加文件: {file}"):
-                print(f"[警告] 添加文件 {file} 失败")
-        else:
-            print(f"[警告] 文件不存在，跳过: {file}")
-    
-    # 5. 检查暂存区状态
+    # 3. 检查暂存区状态
     print("\n[信息] 检查暂存区状态...")
     run_command("git status", "查看暂存区状态")
     
-    # 6. 提交更改
-    commit_message = """feat: 增强交易订单错误处理和日志记录
+    # 4. 提交更改
+    commit_message = """fix(execution): 修复可用保证金与账户总资产概念混淆 | EN: fix confusion between available margin and total equity
 
-- 为所有 create_order 调用添加完整的异常捕获（ExchangeError、NetworkError）
-- 改进错误信息格式，包含异常类型、消息和完整响应
-- 添加详细的调试日志，记录下单参数和返回值
-- 覆盖所有下单场景：开仓、平仓、止损单、止盈单
-- 使用异常链（from e）保留原始异常信息，便于问题排查"""
+- 明确区分"可用保证金"（availEq）和"账户总资产"（equity）的概念
+- 更新 get_balance() 方法文档，明确返回的是可用保证金而非账户总资产
+- 添加账户总资产的获取和日志记录，便于调试和问题排查
+- 当可用保证金为0但账户总资产不为0时，记录警告说明资金可能被用于持仓
+- 更新决策引擎提示，将"当前账户余额"改为"当前可用保证金"
+- 在杠杆计算公式中明确使用可用保证金，并添加概念澄清说明
+- 改进错误信息，明确说明可用保证金为0不等于账户总资产为0"""
     
     print("\n[信息] 提交更改...")
     # 将提交信息写入临时文件，避免命令行编码问题
@@ -110,4 +104,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
