@@ -142,6 +142,8 @@ class UnifiedGeminiAnalyzer:
         balance_text = "## 2. 当前账户余额\n\n"
         if current_balance is not None:
             balance_text += f"当前账户余额: **${current_balance:.2f} USDT**\n可用于交易的资金: **${current_balance * 0.95:.2f} USDT** (95%)\n"
+            if current_balance <= 0:
+                balance_text += "\n**重要说明**: 账户余额为0时，**开仓操作（LONG/SHORT）无法执行**，但**平仓操作（CLOSE_LONG/CLOSE_SHORT）不受影响，可以正常执行**。平仓是减少持仓，不需要可用资金。\n"
         else:
             balance_text += "无法获取当前账户余额信息。\n"
 

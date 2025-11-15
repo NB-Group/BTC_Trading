@@ -509,6 +509,8 @@ class DeepSeekAnalyzer:
         if balance is not None:
             balance_part += f"当前账户余额: **${balance:.2f} USDT**\n"
             balance_part += f"可用于交易的资金: **${balance * 0.95:.2f} USDT** (95%)\n"
+            if balance <= 0:
+                balance_part += "\n**重要说明**: 账户余额为0时，**开仓操作（LONG/SHORT）无法执行**，但**平仓操作（CLOSE_LONG/CLOSE_SHORT）不受影响，可以正常执行**。平仓是减少持仓，不需要可用资金。\n"
         else:
             balance_part += "无法获取当前账户余额信息。\n"
         return balance_part
