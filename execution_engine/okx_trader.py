@@ -242,7 +242,7 @@ class OKXTrader:
                     amount = min(int(suggested_trade_size), max_amount)
                     LOGGER.info(f"[{symbol}] suggested_trade_size > 1，视为张数，使用: {amount} 张 (最大可开: {max_amount} 张)")
                 else:
-                    amount = max_amount
+                amount = max_amount
                     LOGGER.warning(f"[{symbol}] suggested_trade_size 无效或未提供 ({suggested_trade_size})，使用最大可开张数: {amount} 张")
                 
                 if amount < 1:
@@ -265,13 +265,13 @@ class OKXTrader:
                 LOGGER.info(f"[{symbol}] 开仓下单参数: symbol={symbol}, type=market, side={side}, amount={amount}, params={order_params}")
                 
                 try:
-                    order = self.exchange.create_order(
-                        symbol=symbol,
-                        type='market',
-                        side=side,
-                        amount=amount,
-                        params=order_params
-                    )
+                order = self.exchange.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=side,
+                    amount=amount,
+                    params=order_params
+                )
                 except ccxt.ExchangeError as e:
                     error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
                     if hasattr(e, 'response') and e.response:
@@ -410,13 +410,13 @@ class OKXTrader:
                 
                 try:
                     # 首先尝试使用标准的 create_order 方法
-                    order = self.exchange.create_order(
-                        symbol=symbol,
-                        type='market',
-                        side=side,
-                        amount=amount,
-                        params=order_params
-                    )
+                order = self.exchange.create_order(
+                    symbol=symbol,
+                    type='market',
+                    side=side,
+                    amount=amount,
+                    params=order_params
+                )
                 except ccxt.ExchangeError as e:
                     error_str = str(e)
                     error_detail = f"交易所错误: {type(e).__name__}: {error_str}"
@@ -572,11 +572,11 @@ class OKXTrader:
                 is_stop_loss = o_type in ('stop', 'trigger', 'conditional')
                 is_take_profit = o_type == 'limit' and ('takeProfit' in o_params or 'tpTriggerPx' in o_params)
                 if o.get('status') in ('open', 'new') and o_pos_side == pos_side and (is_stop_loss or is_take_profit):
-                    try:
-                        self.exchange.cancel_order(o['id'], symbol=symbol)
+                        try:
+                            self.exchange.cancel_order(o['id'], symbol=symbol)
                         LOGGER.info(f"[{symbol}] 已撤销未成交止盈止损单: {o['id']} {o_type} {o_pos_side} (reduceOnly={o_params.get('reduceOnly', False)})")
-                    except Exception as ce:
-                        LOGGER.warning(f"[{symbol}] 撤销止盈止损单失败: {o['id']} {ce}")
+                        except Exception as ce:
+                            LOGGER.warning(f"[{symbol}] 撤销止盈止损单失败: {o['id']} {ce}")
         except Exception as e:
             LOGGER.warning(f"[{symbol}] 获取/撤销未成交止盈止损单时出错: {e}")
         """
@@ -642,22 +642,22 @@ class OKXTrader:
                         'tdMode': self.margin_mode,
                         'triggerPrice': stop_loss_price,  # 触发价格（CCXT标准参数）| Trigger price (CCXT standard parameter)
                         'orderType': 'market',  # 触发后市价 | Market order after trigger
-                        # OKX 要求市价计划委托传递 orderPx='-1'，否则报 "orderPx can not be empty"
+                            # OKX 要求市价计划委托传递 orderPx='-1'，否则报 "orderPx can not be empty"
                         # OKX requires orderPx='-1' for market trigger orders, otherwise "orderPx can not be empty" error
-                        'orderPx': '-1',
+                            'orderPx': '-1',
                         'reduceOnly': True,  # 只用于平仓，不占用保证金 | Only for closing positions, no margin usage
                     }
                     if self.hedge_mode:
                         stop_order_params['posSide'] = pos_side
                     LOGGER.info(f"[{symbol}] 提交止损计划委托单，数量: {amount}, 类型: {type(amount)} triggerPrice={stop_loss_price}")
                     try:
-                        stop_order = self.exchange.create_order(
-                            symbol=symbol,
-                            type='trigger',  # 计划委托
-                            side='sell' if pos_side == 'long' else 'buy',
-                            amount=amount,
-                            params=stop_order_params
-                        )
+                    stop_order = self.exchange.create_order(
+                        symbol=symbol,
+                        type='trigger',  # 计划委托
+                        side='sell' if pos_side == 'long' else 'buy',
+                        amount=amount,
+                        params=stop_order_params
+                    )
                     except ccxt.ExchangeError as e:
                         error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
                         if hasattr(e, 'response') and e.response:
@@ -705,14 +705,14 @@ class OKXTrader:
                         take_profit_order_params['posSide'] = pos_side
                     LOGGER.info(f"[{symbol}] 提交止盈单，数量: {amount}, 类型: {type(amount)}, price={take_profit_price}")
                     try:
-                        take_profit_order = self.exchange.create_order(
-                            symbol=symbol,
-                            type='limit',
-                            side='sell' if pos_side == 'long' else 'buy',
-                            amount=amount,
-                            price=take_profit_price,
-                            params=take_profit_order_params
-                        )
+                    take_profit_order = self.exchange.create_order(
+                        symbol=symbol,
+                        type='limit',
+                        side='sell' if pos_side == 'long' else 'buy',
+                        amount=amount,
+                        price=take_profit_price,
+                        params=take_profit_order_params
+                    )
                     except ccxt.ExchangeError as e:
                         error_detail = f"交易所错误: {type(e).__name__}: {str(e)}"
                         if hasattr(e, 'response') and e.response:
@@ -785,7 +785,7 @@ class OKXTrader:
                             if available_equity == 0 and total_equity > 0:
                                 LOGGER.warning(f"可用保证金为0，但账户总资产为 {total_equity}（可能资金被用于持仓），回退到可用余额 (availBal): {available_balance}")
                             else:
-                                LOGGER.info(f"可用保证金为0，回退到可用余额 (availBal): {available_balance}")
+                            LOGGER.info(f"可用保证金为0，回退到可用余额 (availBal): {available_balance}")
                             return available_balance
 
             # 如果上述路径找不到，尝试备用方案
