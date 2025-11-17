@@ -523,6 +523,9 @@ class OKXTrader:
                     raise RuntimeError(f"平仓下单失败: {error_detail}")
                 LOGGER.success(f"[{symbol}] 平仓 ({decision}) 订单已成功提交，订单ID: {order.get('id', 'N/A')}")
 
+                # 平仓成功后，立即撤销本方向残留的止盈/止损委托，避免误触或与新仓冲突
+                self._cancel_stop_orders(symbol, current_pos_side)
+
                 # --- [学习闭环] 记录完整交易日志 ---
                 if entry_trade_info:
                     try:
@@ -566,26 +569,16 @@ class OKXTrader:
             LOGGER.error(f"[{symbol}] 执行交易决策时发生未知错误: {e}", exc_info=True)
             self.email_notifier.send_error_notification(f"OKX交易器未知错误 ({symbol})", str(e))
 
-    def _set_stop_orders(self, symbol: str, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str, order_amount: float = None):
+    def _cancel_stop_orders(self, symbol: str, pos_side: str):
         """
-        设置止损和止盈订单前，先撤销当前symbol和pos_side的所有未成交止盈止损委托单。
+        撤销当前 symbol 本方向已有的止盈/止损委托。
         """
         try:
-            # 先撤销未成交止盈止损单
-            # Cancel pending stop-loss and take-profit orders first
-            # 注意：现在止盈止损单都设置了 reduceOnly=True，所以需要撤销所有本方向的止盈止损单
-            # Note: Stop-loss and take-profit orders now have reduceOnly=True, so need to cancel all orders in this direction
             open_orders = self.exchange.fetch_open_orders(symbol=symbol)
             for o in open_orders:
-                # 撤销本方向的止盈止损单（包括 reduceOnly 的止盈止损单）
-                # Cancel stop-loss and take-profit orders in this direction (including reduceOnly orders)
                 o_type = o.get('type')
                 o_params = o.get('info', {})
                 o_pos_side = o_params.get('posSide') if self.hedge_mode else pos_side
-                # OKX止损单type为'stop'或'trigger'，止盈单type为'limit'但带止盈价
-                # OKX stop-loss orders have type 'stop' or 'trigger', take-profit orders have type 'limit' with take-profit price
-                # 现在止盈止损单都设置了 reduceOnly=True，所以需要检查本方向的所有止盈止损单
-                # Now all stop-loss and take-profit orders have reduceOnly=True, so need to check all orders in this direction
                 is_stop_loss = o_type in ('stop', 'trigger', 'conditional')
                 is_take_profit = o_type == 'limit' and ('takeProfit' in o_params or 'tpTriggerPx' in o_params)
                 if o.get('status') in ('open', 'new') and o_pos_side == pos_side and (is_stop_loss or is_take_profit):
@@ -596,9 +589,11 @@ class OKXTrader:
                         LOGGER.warning(f"[{symbol}] 撤销止盈止损单失败: {o['id']} {ce}")
         except Exception as e:
             LOGGER.warning(f"[{symbol}] 获取/撤销未成交止盈止损单时出错: {e}")
+
+    def _set_stop_orders(self, symbol: str, main_order: Union[Dict[str, Any], Any], entry_price: Union[float, Decimal], params: Dict[str, Any], pos_side: str, order_amount: float = None):
         """
         设置止损和止盈订单。
-        
+
         Args:
             main_order: 主订单对象
             entry_price: 入场价格
@@ -606,6 +601,7 @@ class OKXTrader:
             pos_side: 持仓方向
             order_amount: 订单数量（用于市价单，因为市价单的amount字段为None）
         """
+        self._cancel_stop_orders(symbol, pos_side)
         try:
             # 确保entry_price是float类型
             LOGGER.info(f"[{symbol}] [止盈止损] entry_price={entry_price}, params={params}, pos_side={pos_side}, order_amount={order_amount}")
