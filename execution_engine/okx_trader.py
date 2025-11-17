@@ -29,6 +29,12 @@ class OKXTrader:
         self.leverage = futures_config['leverage']
         self.margin_mode = futures_config['margin_mode']
         self.hedge_mode = futures_config.get('hedge_mode', False)
+        self.max_position_usage = float(futures_config.get('max_position_usage', 0.9))
+        if not 0 < self.max_position_usage <= 1:
+            LOGGER.warning(
+                "max_position_usage 配置值无效（必须在 0-1 之间），已自动回退为 0.9"
+            )
+            self.max_position_usage = 0.9
 
         creds = config.API_KEYS.get('okx', {})
         self.exchange_config: Dict[str, Any] = {
@@ -230,6 +236,17 @@ class OKXTrader:
                 else:
                     LOGGER.info(f"[{symbol}] 最大可开张数: {max_amount}")
                 
+                # 限制最大可开张数的使用比例，避免用尽全部保证金
+                usable_max_amount = int(max_amount * self.max_position_usage)
+                if usable_max_amount < 1:
+                    usable_max_amount = 1
+                if usable_max_amount < max_amount:
+                    LOGGER.info(
+                        f"[{symbol}] 应用 max_position_usage={self.max_position_usage:.2f}，"
+                        f"可用张数从 {max_amount} 限制为 {usable_max_amount}"
+                    )
+                max_amount = usable_max_amount
+
                 # 应用 suggested_trade_size 来调整实际交易量
                 LOGGER.info(f"[{symbol}] [仓位计算] suggested_trade_size={suggested_trade_size}, max_amount={max_amount}")
                 if suggested_trade_size is not None and 0 < suggested_trade_size <= 1:

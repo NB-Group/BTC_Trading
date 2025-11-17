@@ -172,4 +172,7 @@ FUTURES = {
     'leverage': 3,                   # 默认杠杆倍数 (推荐 3x)
     'margin_mode': 'cross',          # 保证金模式: 'isolated' (逐仓) or 'cross' (全仓) - 默认全仓
     'hedge_mode': False,             # 是否为双向持仓（hedge），False为单向持仓
+    # 为了避免把账户所有可用保证金一次性占满，限制最大可用仓位比例。
+    # 例如 0.9 表示最多只使用理论可开张数的 90%，留出保证金用于手续费与维持保证金。
+    'max_position_usage': float(os.getenv('MAX_POSITION_USAGE', '0.9')),
 } 
