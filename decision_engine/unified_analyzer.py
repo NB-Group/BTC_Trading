@@ -27,7 +27,7 @@ class UnifiedGeminiAnalyzer:
         gemini_config = config.API_KEYS.get('gemini', {})
         self.base_url = gemini_config.get('base_url')
         self.api_key = gemini_config.get('api_key')
-        self.model = gemini_config.get('model', 'gemini-2.5-pro-thinking')
+        self.model = gemini_config.get('model', 'gemini-3-pro-preview-thinking')
 
         if not all([self.base_url, self.api_key, self.model]):
             raise ValueError("Gemini API的配置不完整 (base_url, api_key, model)。")
