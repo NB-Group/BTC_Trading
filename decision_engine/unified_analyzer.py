@@ -91,17 +91,51 @@ class UnifiedGeminiAnalyzer:
         part = "## 1. 社交媒体与新闻情报\n\n"
         if not twitter_data:
             return part + "无有效的社交媒体或新闻情报。\n"
-        part += "### 1.1 CoinDesk 最新市场新闻 (高优先级)\n分析以下来自CoinDesk的最新市场新闻：\n"
-        for item in twitter_data:
-            source = item.get('source', 'CoinDesk')
-            title = (item.get('text') or '').replace('\n', ' ').strip() or '无标题'
-            desc = (item.get('description') or '').replace('\n', ' ').strip()
-            created_at = item.get('created_at', '未知时间')
-            part += f"\n**来自: {source}** | {created_at}\n"
-            part += f"**标题**: {title}\n"
-            if desc and desc != '无摘要':
-                part += f"**摘要**: {desc}\n"
-            part += "-" * 50 + "\n"
+        
+        # 分离 TruthSocial 和 CoinDesk 数据
+        truthsocial_items = [item for item in twitter_data if 'TruthSocial' in item.get('source', '')]
+        coindesk_items = [item for item in twitter_data if 'TruthSocial' not in item.get('source', '')]
+        
+        # 1. TruthSocial 帖子（特别重要，尤其是特朗普的政策声明）
+        if truthsocial_items:
+            part += "### 1.1 TruthSocial 关键账号帖子 (极高优先级)\n"
+            part += "**重要提示**: TruthSocial帖子，特别是来自特朗普(@realDonaldTrump)等关键政治人物的政策声明，可能对BTC价格产生重大影响。请仔细分析这些帖子的内容，特别关注：\n"
+            part += "- 加密货币相关政策声明\n"
+            part += "- 经济政策或监管态度\n"
+            part += "- 可能影响市场情绪的重大声明\n\n"
+            for item in truthsocial_items:
+                source = item.get('source', 'TruthSocial')
+                username = item.get('username', '')
+                title = (item.get('text') or '').replace('\n', ' ').strip() or '无标题'
+                desc = (item.get('description') or '').replace('\n', ' ').strip()
+                created_at = item.get('created_at', '未知时间')
+                url = item.get('url', '')
+                part += f"\n**来自: {source}**"
+                if username:
+                    part += f" (@{username})"
+                part += f" | {created_at}\n"
+                part += f"**内容**: {title}\n"
+                if desc and desc != '无摘要':
+                    part += f"**摘要**: {desc}\n"
+                if url:
+                    part += f"**链接**: {url}\n"
+                part += "-" * 50 + "\n"
+        
+        # 2. CoinDesk 新闻
+        if coindesk_items:
+            part += "\n### 1.2 CoinDesk 最新市场新闻 (高优先级)\n"
+            part += "分析以下来自CoinDesk的最新市场新闻：\n"
+            for item in coindesk_items:
+                source = item.get('source', 'CoinDesk')
+                title = (item.get('text') or '').replace('\n', ' ').strip() or '无标题'
+                desc = (item.get('description') or '').replace('\n', ' ').strip()
+                created_at = item.get('created_at', '未知时间')
+                part += f"\n**来自: {source}** | {created_at}\n"
+                part += f"**标题**: {title}\n"
+                if desc and desc != '无摘要':
+                    part += f"**摘要**: {desc}\n"
+                part += "-" * 50 + "\n"
+        
         return part
 
     def _build_prompt(self, quant_signals: List[Dict[str, Any]], twitter_data: List[Dict[str, Any]], current_position: Optional[Dict[str, Any]], current_balance: Optional[float], symbol: str) -> str:
@@ -197,6 +231,8 @@ class UnifiedGeminiAnalyzer:
 {balance_text}
 {news_text}
 {qs_text}
+
+**特别提醒**：如果新闻情报中包含 TruthSocial 帖子（特别是来自特朗普等关键政治人物的声明），请给予极高优先级。这些政策声明可能对BTC价格产生重大且快速的影响。请仔细分析这些帖子的内容，特别关注加密货币相关政策、经济政策或监管态度。
 
 # 分析与约束
 1. 仅基于 1H 结构与动量把握 1-6 小时机会；证据不足或冲突→`HOLD`。

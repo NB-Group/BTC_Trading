@@ -379,8 +379,11 @@ class DeepSeekAnalyzer:
 # 信息解读
 - **内部量化模型矩阵**: 多策略共振提升置信度；冲突→`HOLD` 或减弱杠杆。
 - **VLM K线分析 (1H)**: 唯一技术图形来源；用于趋势、结构、关键位、动量与潜在入/出场窗口。
-    - **操作建议解释**: 若 1H 图给出“做多”且条件为“价格高于X”，需验证当前价是否已满足；否则应 `HOLD` 并等待。
+    - **操作建议解释**: 若 1H 图给出"做多"且条件为"价格高于X"，需验证当前价是否已满足；否则应 `HOLD` 并等待。
     - **HOLD 语义**: 若当前无持仓，`HOLD` 表示空仓观望；若当前有持仓，`HOLD` 表示不加减仓但保留止盈止损计划。
+- **社交媒体与新闻情报**: 
+    - **TruthSocial 帖子（极高优先级）**: 来自特朗普(@realDonaldTrump)等关键政治人物的政策声明可能对BTC价格产生重大且快速的影响。请特别关注加密货币相关政策、经济政策或监管态度。如果出现重大政策声明，应优先考虑其对市场的潜在影响。
+    - **CoinDesk 新闻**: 专业市场新闻，提供市场动态和行业分析。
 
 # 当前市场状态与持仓记忆
 - **分析时间**: {current_time_utc}
@@ -450,14 +453,28 @@ class DeepSeekAnalyzer:
         if not twitter_data:
             return twitter_part + "无有效的社交媒体或新闻情报。\n"
 
-        # 由于数据源已更改为CoinDesk，我们不再进行细分
-        twitter_part += "### 1.1 CoinDesk 最新市场新闻 (高优先级)\n"
-        twitter_part += "分析以下来自CoinDesk的最新市场新闻：\n"
-        for news_item in twitter_data:
-            # 复用 _format_tweet 方法来格式化新闻，因为它结构相似
-            twitter_part += self._format_tweet(news_item)
-        twitter_part += "\n"
+        # 分离 TruthSocial 和 CoinDesk 数据
+        truthsocial_items = [item for item in twitter_data if 'TruthSocial' in item.get('source', '')]
+        coindesk_items = [item for item in twitter_data if 'TruthSocial' not in item.get('source', '')]
         
+        # 1. TruthSocial 帖子（特别重要，尤其是特朗普的政策声明）
+        if truthsocial_items:
+            twitter_part += "### 1.1 TruthSocial 关键账号帖子 (极高优先级)\n"
+            twitter_part += "**重要提示**: TruthSocial帖子，特别是来自特朗普(@realDonaldTrump)等关键政治人物的政策声明，可能对BTC价格产生重大影响。请仔细分析这些帖子的内容，特别关注：\n"
+            twitter_part += "- 加密货币相关政策声明\n"
+            twitter_part += "- 经济政策或监管态度\n"
+            twitter_part += "- 可能影响市场情绪的重大声明\n\n"
+            for item in truthsocial_items:
+                twitter_part += self._format_tweet(item)
+        
+        # 2. CoinDesk 新闻
+        if coindesk_items:
+            twitter_part += "\n### 1.2 CoinDesk 最新市场新闻 (高优先级)\n"
+            twitter_part += "分析以下来自CoinDesk的最新市场新闻：\n"
+            for news_item in coindesk_items:
+                twitter_part += self._format_tweet(news_item)
+        
+        twitter_part += "\n"
         return twitter_part
 
     def _format_kline_analysis(self, kline_analysis_dict: Dict[str, Optional[str]]) -> str:

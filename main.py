@@ -12,7 +12,7 @@ import config
 from btc_predictor.predict import get_live_trade_signal, get_rf4_signal, get_bollinger_breakout_signal, get_ma_crossover_signal
 from btc_predictor.utils import LOGGER
 from btc_predictor.kline_plot import create_kline_image
-from data_ingestion.news_feeds import fetch_coindesk_news
+from data_ingestion.news_feeds import fetch_coindesk_news, fetch_truthsocial_news
 from decision_engine.vlm_analyzer import VLMAnalyzer
 from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
 from decision_engine.unified_analyzer import UnifiedGeminiAnalyzer
@@ -108,18 +108,40 @@ def _save_last_run_timestamp():
 
 def get_market_intelligence(symbol: str) -> List[Dict[str, Any]]:
     """
-    从CoinDesk获取特定币种的市场情报。
+    从CoinDesk和TruthSocial获取特定币种的市场情报。
     """
+    all_news_items = []
+    
+    # 1. 获取CoinDesk新闻
     LOGGER.info(f"开始为 {symbol} 获取CoinDesk市场新闻情报...")
-    
-    news_items = fetch_coindesk_news(symbol=symbol, limit=cast(int, config.SOCIAL_MEDIA.get('news_limit', 15)))
-    
-    if not news_items:
+    coindesk_items = fetch_coindesk_news(symbol=symbol, limit=cast(int, config.SOCIAL_MEDIA.get('news_limit', 15)))
+    if coindesk_items:
+        all_news_items.extend(coindesk_items)
+        LOGGER.success(f"从CoinDesk获取到 {len(coindesk_items)} 条新闻。")
+    else:
         LOGGER.warning(f"未能从CoinDesk获取到 {symbol} 的新闻情报。")
+    
+    # 2. 获取TruthSocial帖子（特别关注特朗普等关键账号）
+    LOGGER.info(f"开始为 {symbol} 获取TruthSocial帖子情报...")
+    try:
+        # 从配置中获取要监控的TruthSocial账号，默认为特朗普
+        truthsocial_accounts = config.SOCIAL_MEDIA.get('truthsocial_accounts', ['realDonaldTrump'])
+        truthsocial_limit = cast(int, config.SOCIAL_MEDIA.get('truthsocial_limit', 10))
+        truthsocial_items = fetch_truthsocial_news(accounts=truthsocial_accounts, limit=truthsocial_limit)
+        if truthsocial_items:
+            all_news_items.extend(truthsocial_items)
+            LOGGER.success(f"从TruthSocial获取到 {len(truthsocial_items)} 条帖子。")
+        else:
+            LOGGER.warning(f"未能从TruthSocial获取到帖子情报。")
+    except Exception as e:
+        LOGGER.error(f"获取TruthSocial帖子时发生错误: {e}")
+    
+    if not all_news_items:
+        LOGGER.warning(f"未能获取到任何关于 {symbol} 的新闻情报。")
         return []
-
-    LOGGER.success(f"情报整合完毕，共获取 {len(news_items)} 条关于 {symbol} 的新闻。")
-    return news_items
+    
+    LOGGER.success(f"情报整合完毕，共获取 {len(all_news_items)} 条关于 {symbol} 的新闻和帖子。")
+    return all_news_items
 
 def _generate_and_analyze_kline(vlm_analyzer, price_data, timeframe_alias, timeframe=None):
     """
