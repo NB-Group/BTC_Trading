@@ -16,6 +16,7 @@ from data_ingestion.news_feeds import fetch_coindesk_news, fetch_truthsocial_new
 from decision_engine.vlm_analyzer import VLMAnalyzer
 from decision_engine.deepseek_analyzer import DeepSeekAnalyzer
 from decision_engine.unified_analyzer import UnifiedGeminiAnalyzer
+from decision_engine.gpt_reviewer import GPTReviewer
 from execution_engine.okx_trader import OKXTrader
 from utils.email_notifier import EmailNotifier
 from market_scanner import scan_for_opportunities # 导入市场扫描器
@@ -464,6 +465,23 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     final_decision = track_process('llm_decision', perform_unified_decision)
                 finally:
                     restore_proxy_env(_orig_proxy_env_decision)
+                # gpt-5.1 复核 Gemini 决策
+                if config.DECISION_RULES.get('enable_gpt_reviewer', True):
+                    def perform_reviewer():
+                        reviewer = GPTReviewer()
+                        return reviewer.review(
+                            decision=final_decision,
+                            kline_image_path=kline_image_path_for_unified,
+                            quant_signals=quant_signal_data,
+                            twitter_data=market_news,
+                            current_position=current_position,
+                            current_balance=current_balance,
+                        )
+                    try:
+                        review_result = track_process('gpt_review', perform_reviewer)
+                        final_decision['gpt_review'] = review_result
+                    except Exception as e:
+                        LOGGER.warning(f"[{symbol}] gpt-5.1 审核失败: {e}")
             else:
                 def perform_llm_decision():
                     analyzer = DeepSeekAnalyzer()

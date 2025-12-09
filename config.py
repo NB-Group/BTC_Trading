@@ -60,6 +60,8 @@ DECISION_RULES = {
     'use_unified_gemini': os.getenv('USE_UNIFIED_GEMINI', 'true').lower() == 'true',
     # 统一路径失败时是否自动回退到原先“VLM分析 + DeepSeek决策”路径
     'unified_fallback_enabled': os.getenv('UNIFIED_FALLBACK_ENABLED', 'true').lower() == 'true',
+    # 是否启用 gpt-5.1 对 Gemini 决策的二次审核
+    'enable_gpt_reviewer': os.getenv('ENABLE_GPT_REVIEWER', 'true').lower() == 'true',
 }
 
 # ----------------- 自动更新与热重载 -----------------
