@@ -615,6 +615,157 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
         LOGGER.info(f"========== 币种 {symbol} 处理结束 ==========\n")
 
 
+def check_quant_signals_only(symbol: str) -> List[Dict[str, Any]]:
+    """
+    仅获取量化模型信号，不进行VLM和LLM分析。
+    用于快速检测是否有交易信号。
+    
+    Returns:
+        量化信号列表
+    """
+    from btc_predictor.data import get_data
+    
+    # OKX symbol format for ccxt: 'BTC/USDT'
+    ccxt_symbol = symbol.replace('-SWAP', '').replace('-', '/')
+    
+    quant_signals = []
+    
+    try:
+        # 1. 获取RF4背离策略信号
+        rf4_signal_data = get_rf4_signal(symbol=ccxt_symbol, period=15, order=5)
+        if rf4_signal_data:
+            rf4_formatted = {
+                "signal": rf4_signal_data["signal"],
+                "predicted_return": 0.0,
+                "current_price": rf4_signal_data["current_price"],
+                "timestamp": rf4_signal_data["timestamp"],
+                "info": f"RF4背离策略信号 - {rf4_signal_data['action']}",
+                "strategy": "RF4_Divergence"
+            }
+            quant_signals.append(rf4_formatted)
+        else:
+            quant_signals.append({
+                "signal": "ERROR", 
+                "info": "无法获取RF4信号", 
+                "strategy": "RF4_Divergence"
+            })
+    except Exception as e:
+        LOGGER.warning(f"[{symbol}] 获取RF4信号失败: {e}")
+        quant_signals.append({
+            "signal": "ERROR", 
+            "info": f"RF4信号获取失败: {e}", 
+            "strategy": "RF4_Divergence"
+        })
+    
+    try:
+        # 2. 获取布林带突破策略信号
+        bb_signal_data = get_bollinger_breakout_signal(symbol=ccxt_symbol, window=20, std_dev=2.0)
+        if bb_signal_data:
+            bb_formatted = {
+                "signal": bb_signal_data["signal"],
+                "predicted_return": 0.0,
+                "current_price": bb_signal_data["current_price"],
+                "timestamp": bb_signal_data["timestamp"],
+                "info": f"布林带突破策略 - {bb_signal_data['action']}",
+                "strategy": "Bollinger_Breakout"
+            }
+            quant_signals.append(bb_formatted)
+        else:
+            quant_signals.append({
+                "signal": "ERROR", 
+                "info": "无法获取布林带突破信号", 
+                "strategy": "Bollinger_Breakout"
+            })
+    except Exception as e:
+        LOGGER.warning(f"[{symbol}] 获取布林带突破信号失败: {e}")
+        quant_signals.append({
+            "signal": "ERROR", 
+            "info": f"布林带突破信号获取失败: {e}", 
+            "strategy": "Bollinger_Breakout"
+        })
+    
+    try:
+        # 3. 获取MA交叉策略信号
+        ma_crossover_signal_data = get_ma_crossover_signal(symbol=ccxt_symbol, fast_period=5, slow_period=20)
+        if ma_crossover_signal_data:
+            ma_formatted = {
+                "signal": ma_crossover_signal_data["signal"],
+                "predicted_return": 0.0,
+                "current_price": ma_crossover_signal_data["current_price"],
+                "timestamp": ma_crossover_signal_data["timestamp"],
+                "info": f"MA交叉策略 - {ma_crossover_signal_data['action']}",
+                "strategy": "MA_Crossover"
+            }
+            quant_signals.append(ma_formatted)
+        else:
+            quant_signals.append({
+                "signal": "ERROR", 
+                "info": "无法获取MA交叉信号", 
+                "strategy": "MA_Crossover"
+            })
+    except Exception as e:
+        LOGGER.warning(f"[{symbol}] 获取MA交叉信号失败: {e}")
+        quant_signals.append({
+            "signal": "ERROR", 
+            "info": f"MA交叉信号获取失败: {e}", 
+            "strategy": "MA_Crossover"
+        })
+    
+    return quant_signals
+
+
+def run_quant_signal_check(skip_llm: bool = False):
+    """
+    每1分钟执行的纯量化模型信号检查。
+    如果检测到非HOLD信号，立即触发完整判断。
+    """
+    LOGGER.info("========== 执行1分钟量化信号检查 ==========")
+
+    # 若当前分钟为整点，与1小时完整决策重叠，跳过以避免重复触发
+    if datetime.now().minute == 0:
+        LOGGER.info("与整点完整决策重叠，跳过本次1分钟量化信号检查。")
+        return
+    
+    trader = OKXTrader(demo_mode=config.DEMO_MODE)
+    email_notifier = EmailNotifier()
+    
+    # 获取主攻币种
+    main_symbols = config.FUTURES.get('trade_symbols', [])
+    if not main_symbols:
+        LOGGER.warning("配置文件中未设置主攻交易对，跳过量化信号检查。")
+        return
+    
+    primary_symbol = main_symbols[0]
+    
+    try:
+        # 快速获取量化信号
+        quant_signals = check_quant_signals_only(primary_symbol)
+        
+        # 检查是否有非HOLD信号
+        has_signal = False
+        signal_details = []
+        for signal in quant_signals:
+            signal_type = signal.get('signal', 'HOLD').upper()
+            strategy = signal.get('strategy', 'Unknown')
+            if signal_type not in ['HOLD', 'ERROR']:
+                has_signal = True
+                signal_details.append(f"{strategy}: {signal_type}")
+        
+        if has_signal:
+            LOGGER.info(f"[{primary_symbol}] ⚡ 检测到量化信号: {', '.join(signal_details)}，立即触发完整判断...")
+            print(f"\033[38;5;143m[{primary_symbol}] ⚡ 检测到量化信号: {', '.join(signal_details)}，立即触发完整判断...\033[0m")
+            
+            # 触发完整判断
+            analyze_and_trade_symbol(primary_symbol, trader, email_notifier, skip_llm, is_primary_symbol=True)
+        else:
+            # 只在debug级别记录，避免日志过多
+            LOGGER.debug(f"[{primary_symbol}] 量化信号检查：所有信号均为HOLD或ERROR，无需触发完整判断。")
+            
+    except Exception as e:
+        LOGGER.error(f"量化信号检查失败: {e}", exc_info=True)
+        email_notifier.send_error_notification("量化信号检查错误", str(e))
+
+
 def run_trading_cycle(skip_llm: bool = False):
     """
     运行一个完整的交易决策周期。
@@ -712,11 +863,16 @@ def main():
 
     print("\033[38;5;152m[调度] BTC_TRADING 主控程序已启动（调度模式）\033[0m")  # 莫兰迪薄荷绿
     print("\033[38;5;102m[调度] 每小时整点自动运行决策周期。\033[0m")  # 莫兰迪灰绿色
+    print("\033[38;5;102m[调度] 每1分钟执行一次纯量化模型信号检查。\033[0m")  # 新增：量化信号检查
     print("\033[38;5;102m[调度] 按 Ctrl+C 可随时退出。\033[0m")
     print("\033[38;5;102m" + "──────────────────────────────────────────────────────────────────────────────" + "\033[0m")
 
-    # 只用schedule的每小时整点调度
+    # 每小时整点调度完整决策周期
     schedule.every().hour.at(":00").do(job)
+    
+    # 每1分钟执行一次纯量化模型信号检查
+    quant_check_job = partial(run_quant_signal_check, skip_llm=args.skip_llm)
+    schedule.every(1).minutes.do(quant_check_job)
 
     last_run_utc = _get_last_run_timestamp()
     if not last_run_utc or (datetime.now(timezone.utc) - last_run_utc).total_seconds() > 3600:
