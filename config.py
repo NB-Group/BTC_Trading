@@ -41,7 +41,8 @@ EMAIL_CONFIG = {
 # ----------------- Defaults -----------------
 DEFAULTS = {
     'proxy_url': os.getenv('PROXY_URL'),  # 代理地址，如果不需要则设为 None
-    'model_name': 'btc-crossover-regression-v1', # 指定要用于实时信号的主模型
+    # 默认实时信号主模型，改为使用 gpt-5 系列模型（可通过环境变量覆盖）
+    'model_name': os.getenv('DEFAULT_MODEL_NAME', 'gpt-5.1'),
 }
 
 # ================= 交易决策规则（可调） =================
@@ -153,12 +154,12 @@ API_KEYS = {
     "deepseek": {
         'api_key': os.getenv('DEEPSEEK_API_KEY'),
         'base_url': os.getenv('DEEPSEEK_BASE_URL', "https://api.siliconflow.cn/v1"),
-        'model': os.getenv('DEEPSEEK_MODEL', "deepseek-ai/DeepSeek-R1")
+        'model': os.getenv('DEEPSEEK_MODEL', "gpt-5.1"),
     },
     "gemini": {
         'api_key': os.getenv('GEMINI_API_KEY'),
         'base_url': os.getenv('GEMINI_BASE_URL', 'https://jeniya.cn/v1'),
-        'model': os.getenv('GEMINI_MODEL', 'gemini-2.5-pro')
+        'model': os.getenv('GEMINI_MODEL', 'gemini-3-pro-preview'),
     },
     "twitter": {
         "x-rapidapi-key": os.getenv('TWITTER_RAPIDAPI_KEY'),

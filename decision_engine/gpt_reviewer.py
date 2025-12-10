@@ -23,7 +23,8 @@ class GPTReviewer:
             api_key=api_key,
             base_url=os.getenv("GPT_REVIEW_BASE_URL") or None,
         )
-        self.model = os.getenv("GPT_REVIEW_MODEL", "gpt-5.1")
+        # 审核模型改为 Gemini 3 预览（可通过环境变量覆盖）
+        self.model = os.getenv("GPT_REVIEW_MODEL", "gemini-3-pro-preview")
 
     def review(
         self,
