@@ -27,8 +27,8 @@ class UnifiedGeminiAnalyzer:
         gemini_config = config.API_KEYS.get('gemini', {})
         self.base_url = gemini_config.get('base_url')
         self.api_key = gemini_config.get('api_key')
-        # 默认使用 Gemini 3 预览模型，可通过环境变量覆盖
-        self.model = gemini_config.get('model', 'gemini-3-pro-preview')
+        # 默认模型改为 gpt-5.2，可通过环境变量覆盖
+        self.model = gemini_config.get('model', 'gpt-5.2')
 
         if not all([self.base_url, self.api_key, self.model]):
             raise ValueError("Gemini API的配置不完整 (base_url, api_key, model)。")

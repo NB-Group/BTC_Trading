@@ -1,1 +1,15 @@
-{}
+{
+    "BTC-USDT-SWAP": {
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 1,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-14T05:26:05.478060+00:00",
+        "entry_price": 90061.8,
+        "entry_contracts": 1.0
+    }
+}

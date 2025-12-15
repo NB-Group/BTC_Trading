@@ -248,16 +248,36 @@ class OKXTrader:
                 max_amount = usable_max_amount
 
                 # 应用 suggested_trade_size 来调整实际交易量
+                # 判断逻辑：
+                # - 如果是整数（或可转换为整数）且 >= 1：视为张数，强制使用
+                # - 如果是小数且 0 < value < 1：视为比例
+                # - 特殊情况：1.0 优先当作1张（而不是100%比例）
                 LOGGER.info(f"[{symbol}] [仓位计算] suggested_trade_size={suggested_trade_size}, max_amount={max_amount}")
-                if suggested_trade_size is not None and 0 < suggested_trade_size <= 1:
-                    amount = int(max_amount * suggested_trade_size)
-                    if amount < 1:
-                        amount = 1  # 至少1张
-                    LOGGER.info(f"[{symbol}] 应用建议仓位比例 {suggested_trade_size:.2%}，调整后数量: {amount} 张 (最大可开: {max_amount} 张)")
-                elif suggested_trade_size is not None and suggested_trade_size > 1:
-                    # 如果 suggested_trade_size > 1，可能是以张数形式传入，直接使用（但不超过最大可开）
-                    amount = min(int(suggested_trade_size), max_amount)
-                    LOGGER.info(f"[{symbol}] suggested_trade_size > 1，视为张数，使用: {amount} 张 (最大可开: {max_amount} 张)")
+                if suggested_trade_size is not None:
+                    # 判断是否为整数（张数）还是小数（比例）
+                    is_integer = isinstance(suggested_trade_size, int) or (isinstance(suggested_trade_size, float) and suggested_trade_size.is_integer())
+                    
+                    if is_integer and suggested_trade_size >= 1:
+                        # 整数且 >= 1：视为张数，强制使用（不乘以max_amount）
+                        amount = int(suggested_trade_size)
+                        if amount > max_amount:
+                            LOGGER.warning(
+                                f"[{symbol}] 请求数量 {amount} 张超过最大可开 {max_amount} 张，"
+                                f"但按请求强制使用 {amount} 张（可能导致保证金不足）"
+                            )
+                        LOGGER.info(f"[{symbol}] suggested_trade_size={amount} 视为张数，强制使用: {amount} 张 (最大可开: {max_amount} 张)")
+                    elif not is_integer and 0 < suggested_trade_size < 1:
+                        # 小数且 < 1：视为比例
+                        amount = int(max_amount * suggested_trade_size)
+                        if amount < 1:
+                            amount = 1  # 至少1张
+                        LOGGER.info(f"[{symbol}] 应用建议仓位比例 {suggested_trade_size:.2%}，调整后数量: {amount} 张 (最大可开: {max_amount} 张)")
+                    else:
+                        # 其他情况（包括1.0）：当作张数处理
+                        amount = int(suggested_trade_size) if suggested_trade_size > 0 else max_amount
+                        if amount < 1:
+                            amount = 1
+                        LOGGER.info(f"[{symbol}] suggested_trade_size={suggested_trade_size}，视为张数，使用: {amount} 张 (最大可开: {max_amount} 张)")
                 else:
                     amount = max_amount
                     LOGGER.warning(f"[{symbol}] suggested_trade_size 无效或未提供 ({suggested_trade_size})，使用最大可开张数: {amount} 张")

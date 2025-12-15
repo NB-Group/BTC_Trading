@@ -1,0 +1,41 @@
+{
+  "initial_balance": 3487.0465890125743,
+  "current_balance": 3486.3836291725743,
+  "total_trades": 2,
+  "statistics": {
+    "total_trades": 2,
+    "win_rate": 100.0,
+    "total_pnl_pct": 0.12378054096731998,
+    "total_pnl_usd": 359.87367164000034,
+    "avg_pnl_pct": 0.06189027048365999,
+    "avg_pnl_usd": 179.93683582000017,
+    "winning_trades": 2,
+    "losing_trades": 0,
+    "avg_hold_seconds": 122.57248799999999
+  },
+  "trades": [
+    {
+      "trade_id": 1,
+      "timestamp": "2025-12-14T13:15:25.561101",
+      "position": "LONG",
+      "entry_price": 90084.3,
+      "exit_price": 90153.35,
+      "pnl_pct": 0.076650426322903,
+      "realized_pnl_usd": 179.97387995999998,
+      "hold_seconds": 122.688746,
+      "leverage": 5
+    },
+    {
+      "trade_id": 2,
+      "timestamp": "2025-12-14T13:25:02.260389",
+      "position": "LONG",
+      "entry_price": 90069.8,
+      "exit_price": 90112.25,
+      "pnl_pct": 0.04713011464441698,
+      "realized_pnl_usd": 179.89979168000036,
+      "hold_seconds": 122.45623,
+      "leverage": 5
+    }
+  ],
+  "last_updated": "2025-12-14T13:25:02.368021"
+}

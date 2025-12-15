@@ -2229,5 +2229,491 @@
         "exit_price": 90840.1,
         "exit_reason": "LLM Decision: CLOSE_SHORT",
         "pnl": 33153.000000000175
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:02:28.488247+00:00",
+        "entry_price": 90075.9,
+        "exit_timestamp_utc": "2025-12-13T16:02:59.931445+00:00",
+        "exit_price": 90094.0,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 325.8000000001048
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:03:17.078015+00:00",
+        "entry_price": 90107.6,
+        "exit_timestamp_utc": "2025-12-13T16:03:48.984739+00:00",
+        "exit_price": 90143.3,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 642.5999999999476
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:08:40.681256+00:00",
+        "entry_price": 90149.2065,
+        "exit_timestamp_utc": "2025-12-13T16:09:11.695685+00:00",
+        "exit_price": 90155.8,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 118.6830000000482
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:09:53.086638+00:00",
+        "entry_price": 90128.35961111111,
+        "exit_timestamp_utc": "2025-12-13T16:10:24.622711+00:00",
+        "exit_price": 90144.7,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 294.1269999999495
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:15:08.848797+00:00",
+        "entry_price": 90149.8,
+        "exit_timestamp_utc": "2025-12-13T16:15:41.305736+00:00",
+        "exit_price": 90112.5,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": -671.4000000000524,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期上涨，而是继续下跌，证明了当时的看涨信号是一个‘多头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:16:06.410370+00:00",
+        "entry_price": 90094.75322222222,
+        "exit_timestamp_utc": "2025-12-13T16:16:38.269952+00:00",
+        "exit_price": 90112.5,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 319.44200000001
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:17:25.639045+00:00",
+        "entry_price": 90109.8,
+        "exit_timestamp_utc": "2025-12-13T16:17:57.815225+00:00",
+        "exit_price": 90104.9,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": -88.20000000015716,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期下跌，而是继续上涨，证明了当时的看跌信号是一个‘空头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:18:16.439940+00:00",
+        "entry_price": 90096.17061111111,
+        "exit_timestamp_utc": "2025-12-13T16:18:48.113289+00:00",
+        "exit_price": 90092.5,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": -66.07100000002538,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期下跌，而是继续上涨，证明了当时的看跌信号是一个‘空头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:19:10.125299+00:00",
+        "entry_price": 90080.8,
+        "exit_timestamp_utc": "2025-12-13T16:19:41.792032+00:00",
+        "exit_price": 90080.9,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 1.7999999998428393
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:20:11.286834+00:00",
+        "entry_price": 90090.1,
+        "exit_timestamp_utc": "2025-12-13T16:20:43.134625+00:00",
+        "exit_price": 90080.8,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": -167.4000000000524,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期上涨，而是继续下跌，证明了当时的看涨信号是一个‘多头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:22:16.446628+00:00",
+        "entry_price": 90066.7,
+        "exit_timestamp_utc": "2025-12-13T16:22:48.807201+00:00",
+        "exit_price": 90043.1,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": -424.79999999984284,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期下跌，而是继续上涨，证明了当时的看跌信号是一个‘空头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:23:12.607872+00:00",
+        "entry_price": 90047.58738888889,
+        "exit_timestamp_utc": "2025-12-13T16:23:44.767466+00:00",
+        "exit_price": 90056.5,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 160.42699999999604
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:24:19.078918+00:00",
+        "entry_price": 90041.0,
+        "exit_timestamp_utc": "2025-12-13T16:24:51.289378+00:00",
+        "exit_price": 90049.5,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 153.0
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:25:10.473432+00:00",
+        "entry_price": 90056.1,
+        "exit_timestamp_utc": "2025-12-13T16:25:42.416711+00:00",
+        "exit_price": 90031.8,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": -413.1000000000495,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期上涨，而是继续下跌，证明了当时的看涨信号是一个‘多头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:26:01.374854+00:00",
+        "entry_price": 90026.9,
+        "exit_timestamp_utc": "2025-12-13T16:26:33.600051+00:00",
+        "exit_price": 90038.7,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 200.60000000004948
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:28:38.228818+00:00",
+        "entry_price": 90039.4,
+        "exit_timestamp_utc": "2025-12-13T16:29:10.523357+00:00",
+        "exit_price": 90033.9,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": -93.5,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期下跌，而是继续上涨，证明了当时的看跌信号是一个‘空头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:30:12.584445+00:00",
+        "entry_price": 90033.9,
+        "exit_timestamp_utc": "2025-12-13T16:30:44.168102+00:00",
+        "exit_price": 90009.1,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": -421.5999999998021,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期下跌，而是继续上涨，证明了当时的看跌信号是一个‘空头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:32:03.542376+00:00",
+        "entry_price": 90014.91876470589,
+        "exit_timestamp_utc": "2025-12-13T16:32:34.798222+00:00",
+        "exit_price": 90018.0,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 52.38099999993574
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:33:43.998483+00:00",
+        "entry_price": 90005.0,
+        "exit_timestamp_utc": "2025-12-13T16:34:15.116621+00:00",
+        "exit_price": 90018.0,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 221.0
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 25,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T16:34:45.926189+00:00",
+        "entry_price": 90038.7,
+        "exit_timestamp_utc": "2025-12-13T16:35:17.949484+00:00",
+        "exit_price": 90018.0,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": -351.8999999999505,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期上涨，而是继续下跌，证明了当时的看涨信号是一个‘多头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 15,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T17:10:50.085172+00:00",
+        "entry_price": 89940.1,
+        "exit_timestamp_utc": "2025-12-13T17:11:22.152134+00:00",
+        "exit_price": 89957.9,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 266.9999999998254
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 15,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T17:12:35.384405+00:00",
+        "entry_price": 89966.7,
+        "exit_timestamp_utc": "2025-12-13T17:13:06.925837+00:00",
+        "exit_price": 90027.1,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 906.000000000131
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "SHORT",
+            "suggested_trade_size": 15,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-13T17:15:08.079037+00:00",
+        "entry_price": 90017.7,
+        "exit_timestamp_utc": "2025-12-13T17:15:40.083633+00:00",
+        "exit_price": 90049.8,
+        "exit_reason": "LLM Decision: CLOSE_SHORT",
+        "pnl": 481.5000000000873
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 1,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-14T04:04:18.611374+00:00",
+        "entry_price": 90232.0,
+        "exit_timestamp_utc": "2025-12-14T04:04:50.360718+00:00",
+        "exit_price": 90231.9,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": -1.700000000098953,
+        "outcome_analysis": "行情复盘：入场后，价格并未按预期上涨，而是继续下跌，证明了当时的看涨信号是一个‘多头陷阱’。"
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 1,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-14T04:11:11.580822+00:00",
+        "entry_price": 90218.1,
+        "exit_timestamp_utc": "2025-12-14T04:11:43.830652+00:00",
+        "exit_price": 90235.0,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 287.29999999990105
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 1,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-14T04:44:09.406029+00:00",
+        "entry_price": 90115.9,
+        "exit_timestamp_utc": "2025-12-14T04:45:33.655911+00:00",
+        "exit_price": 90126.0,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 10.10000000000582
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 1,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-14T05:13:22.305808+00:00",
+        "entry_price": 90084.3,
+        "exit_timestamp_utc": "2025-12-14T05:15:24.402961+00:00",
+        "exit_price": 90114.4,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 30.09999999999127
+    },
+    {
+        "symbol": "BTC-USDT-SWAP",
+        "entry_report": {
+            "symbol": "BTC-USDT-SWAP",
+            "decision": "LONG",
+            "suggested_trade_size": 1,
+            "trade_params": {
+                "leverage": 5
+            }
+        },
+        "entry_timestamp_utc": "2025-12-14T05:22:59.226305+00:00",
+        "entry_price": 90069.8,
+        "exit_timestamp_utc": "2025-12-14T05:25:01.041427+00:00",
+        "exit_price": 90074.5,
+        "exit_reason": "LLM Decision: CLOSE_LONG",
+        "pnl": 4.69999999999709
     }
 ]
