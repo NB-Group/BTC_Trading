@@ -3,10 +3,12 @@ import pandas as pd
 import numpy as np
 import asyncio
 from typing import Optional, Tuple, cast
+from pathlib import Path
+import urllib.request
 from playwright.sync_api import sync_playwright
 from pyecharts import options as opts
 from pyecharts.charts import Kline, Line, Bar, Grid
-from pyecharts.globals import ThemeType
+from pyecharts.globals import ThemeType, CurrentConfig
 from .utils import LOGGER
 import time
 
@@ -32,6 +34,27 @@ except RuntimeError as e:
     # 对于一个库来说，仅仅记录错误可能更合适。
 
 
+def _ensure_local_echarts_assets(save_dir: str) -> Optional[str]:
+    """
+    下载并缓存 echarts.min.js，返回可供 pyecharts 使用的本地 host（file://.../assets/）。
+    如果下载失败则返回 None，让调用方回退到默认远程 CDN。
+    """
+    assets_dir = Path(save_dir) / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    echarts_path = assets_dir / "echarts.min.js"
+    if not echarts_path.exists():
+        url = "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"
+        try:
+            LOGGER.info(f"本地未发现 echarts 资源，开始下载: {url}")
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                echarts_path.write_bytes(resp.read())
+            LOGGER.success(f"已下载 echarts 到本地: {echarts_path}")
+        except Exception as e:
+            LOGGER.warning(f"下载 echarts 失败，将回退到在线资源: {e}")
+            return None
+    return echarts_path.parent.as_uri() + "/"
+
+
 def _create_kline_screenshot(html_path: str, image_path: str) -> None:
     """使用Playwright同步API对HTML文件中的图表元素进行截图"""
     with sync_playwright() as p:
@@ -43,7 +66,9 @@ def _create_kline_screenshot(html_path: str, image_path: str) -> None:
             for attempt in range(1, max_attempts + 1):
                 try:
                     page.goto(f"file://{os.path.abspath(html_path)}", wait_until="load", timeout=90000)
-                    page.wait_for_selector(".chart-container canvas", state='visible', timeout=30000)
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                    page.wait_for_selector(".chart-container", state="attached", timeout=20000)
+                    page.wait_for_function("() => document.querySelector('.chart-container canvas') !== null", timeout=30000)
                     time.sleep(1)
                     chart_element = page.query_selector(".chart-container")
                     if chart_element:
@@ -234,14 +259,20 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache", timeframe: str
         html_filename = f"temp_kline_{symbol_filename}_{data_time_range}.html"
         html_path = os.path.join(save_dir, html_filename)
 
-        # ECharts 渲染的HTML
-        grid_chart.render(path=html_path) 
-        
-        # 运行同步截图
-        _create_kline_screenshot(html_path, image_path)
-        
-        # 清理临时HTML文件
-        os.remove(html_path)
+        # ECharts 渲染的HTML（优先使用本地缓存的 echarts 以避免离线超时）
+        previous_host = CurrentConfig.ONLINE_HOST
+        local_host = _ensure_local_echarts_assets(save_dir)
+        if local_host:
+            CurrentConfig.ONLINE_HOST = local_host
+        try:
+            grid_chart.render(path=html_path)
+            # 运行同步截图
+            _create_kline_screenshot(html_path, image_path)
+        finally:
+            CurrentConfig.ONLINE_HOST = previous_host
+            # 清理临时HTML文件
+            if os.path.exists(html_path):
+                os.remove(html_path)
 
         return image_path, data_time_range
     
