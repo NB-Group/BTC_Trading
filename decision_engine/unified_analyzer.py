@@ -312,6 +312,8 @@ class UnifiedGeminiAnalyzer:
         img_b64, mime = self._encode_image(kline_image_path)
         img_url = f"data:{mime};base64,{img_b64}"
 
+        # 目前上游 Gemini 端对该模型的最大 completion tokens 约为 128k，
+        # 这里设置一个足够大的安全上限（如 8000），避免出现 invalid_value 错误。
         response = self.client.chat.completions.create(
             model=self.model,
             messages=[
@@ -324,7 +326,7 @@ class UnifiedGeminiAnalyzer:
                 }
             ],
             temperature=0.4,
-            max_tokens=1048576,
+            max_tokens=8000,
             stream=False,
             response_format={"type": "json_object"},
         )

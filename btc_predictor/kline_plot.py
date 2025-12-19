@@ -1,14 +1,17 @@
 import os
+import time
+from pathlib import Path
+from typing import Optional, Tuple, cast
+
+import asyncio
 import pandas as pd
 import numpy as np
-import asyncio
-from typing import Optional, Tuple, cast
 from playwright.sync_api import sync_playwright
 from pyecharts import options as opts
 from pyecharts.charts import Kline, Line, Bar, Grid
 from pyecharts.globals import ThemeType
 from .utils import LOGGER
-import time
+import urllib.request
 
 # 确保 Playwright 浏览器已安装
 def ensure_playwright_browsers_installed():
@@ -32,6 +35,38 @@ except RuntimeError as e:
     # 对于一个库来说，仅仅记录错误可能更合适。
 
 
+def _ensure_local_echarts_assets(save_dir: str) -> Optional[Path]:
+    """
+    下载并缓存 echarts.min.js。
+    优先使用你指定的 jsdelivr 源:
+    https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js
+    """
+    assets_dir = Path(save_dir) / "assets"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    echarts_path = assets_dir / "echarts.min.js"
+    if not echarts_path.exists():
+        # 优先使用用户指定的 jsdelivr 地址
+        url = "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js"
+        try:
+            LOGGER.info(f"本地未发现 echarts 资源，开始下载: {url}")
+            with urllib.request.urlopen(url, timeout=30) as resp:
+                echarts_path.write_bytes(resp.read())
+            LOGGER.success(f"已下载 echarts 到本地: {echarts_path}")
+        except Exception as e:
+            LOGGER.warning(f"从 jsdelivr 下载 echarts 失败，将尝试备用地址: {e}")
+            # 备用：尝试 pyecharts 默认地址一次
+            fallback = "https://assets.pyecharts.org/assets/v5/echarts.min.js"
+            try:
+                LOGGER.info(f"尝试从备用地址下载 echarts: {fallback}")
+                with urllib.request.urlopen(fallback, timeout=30) as resp:
+                    echarts_path.write_bytes(resp.read())
+                LOGGER.success(f"已从备用地址下载 echarts 到本地: {echarts_path}")
+            except Exception as e2:
+                LOGGER.warning(f"备用地址也下载失败，将继续使用在线资源: {e2}")
+                return None
+    return echarts_path
+
+
 def _create_kline_screenshot(html_path: str, image_path: str) -> None:
     """使用Playwright同步API对HTML文件中的图表元素进行截图"""
     with sync_playwright() as p:
@@ -43,7 +78,9 @@ def _create_kline_screenshot(html_path: str, image_path: str) -> None:
             for attempt in range(1, max_attempts + 1):
                 try:
                     page.goto(f"file://{os.path.abspath(html_path)}", wait_until="load", timeout=90000)
-                    page.wait_for_selector(".chart-container canvas", state='visible', timeout=30000)
+                    page.wait_for_load_state("networkidle", timeout=20000)
+                    page.wait_for_selector(".chart-container", state="attached", timeout=20000)
+                    page.wait_for_function("() => document.querySelector('.chart-container canvas') !== null", timeout=30000)
                     time.sleep(1)
                     chart_element = page.query_selector(".chart-container")
                     if chart_element:
@@ -235,13 +272,38 @@ def create_kline_image(df: pd.DataFrame, save_dir: str = "cache", timeframe: str
         html_path = os.path.join(save_dir, html_filename)
 
         # ECharts 渲染的HTML
-        grid_chart.render(path=html_path) 
-        
+        grid_chart.render(path=html_path)
+
+        # 将 HTML 中对远程 echarts 的引用替换为本地缓存文件，避免离线环境加载失败
+        local_echarts = _ensure_local_echarts_assets(save_dir)
+        if local_echarts is not None:
+            try:
+                html_text = Path(html_path).read_text(encoding="utf-8")
+                local_uri = local_echarts.as_uri()
+                # 兼容常见的几种 pyecharts / jsdelivr 默认地址
+                html_text = html_text.replace(
+                    "https://cdn.jsdelivr.net/npm/echarts@5.5.0/dist/echarts.min.js",
+                    local_uri,
+                )
+                html_text = html_text.replace(
+                    "https://assets.pyecharts.org/assets/v5/echarts.min.js",
+                    local_uri,
+                )
+                html_text = html_text.replace(
+                    "https://assets.pyecharts.org/assets/echarts.min.js",
+                    local_uri,
+                )
+                Path(html_path).write_text(html_text, encoding="utf-8")
+                LOGGER.info(f"已将 K 线 HTML 中的 echarts 引用替换为本地文件: {local_echarts}")
+            except Exception as e:
+                LOGGER.warning(f"替换 HTML 中 echarts 引用失败，将尝试使用在线资源: {e}")
+
         # 运行同步截图
         _create_kline_screenshot(html_path, image_path)
-        
+
         # 清理临时HTML文件
-        os.remove(html_path)
+        if os.path.exists(html_path):
+            os.remove(html_path)
 
         return image_path, data_time_range
     
