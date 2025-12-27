@@ -208,6 +208,8 @@ class UnifiedGeminiAnalyzer:
             "reasoning": "详述完整逻辑链。**必须首先明确说明当前持仓状态和未实现盈亏情况**（如果有持仓），然后分析图像结构、量化信号与新闻，最后给出风险与参数。",
             "key_signals_detected": "列出本次决策的关键多/空/风险信号。没有则写无。",
             "confidence": 0.0,
+            # 标注市场形态：TREND 或 RANGE（震荡）
+            "market_regime": "TREND/RANGE",
             "suggested_trade_size": 1.0,
             "trade_params": {
                 "leverage": default_leverage,
@@ -236,6 +238,7 @@ class UnifiedGeminiAnalyzer:
 **特别提醒**：如果新闻情报中包含 TruthSocial 帖子（特别是来自特朗普等关键政治人物的声明），请给予极高优先级。这些政策声明可能对BTC价格产生重大且快速的影响。请仔细分析这些帖子的内容，特别关注加密货币相关政策、经济政策或监管态度。
 
 # 分析与约束
+0. **市场形态判定（强制）**：在给出任何交易建议前，先判断当前市场是 **趋势（TREND）** 还是 **震荡/区间（RANGE）**。若判断为 `RANGE`（震荡），**优先采用区间反转策略（在支撑/阻力附近做反转）而不是突破策略**；若判断为 `TREND`，以顺势突破/追随趋势为主。请在输出 JSON 中返回 `market_regime` 字段（取值：\"TREND\" 或 \"RANGE\"），并在 `reasoning` 中明确说明判定依据与位置（支撑/阻力/均线）。
 1. 仅基于 1H 结构与动量把握 1-6 小时机会；证据不足或冲突→`HOLD`。
 2. **资金优先 (硬性要求)**：若开仓（LONG/SHORT），计算满足交易所**最小开仓名义价值**所需最低杠杆：
    所需杠杆 = (最小开仓名义价值) / (当前可用保证金 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。否则，设定最终杠杆 = max(向上取整后的所需杠杆, {default_leverage})，写入 trade_params。
