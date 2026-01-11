@@ -19,7 +19,7 @@ class UnifiedGeminiAnalyzer:
     - 直接输入 1H K线图（图片）+ 量化信号 + 新闻情报 + 持仓与余额
     - 输出与 DeepSeekAnalyzer 相同结构的交易决策 JSON
 
-    基于 OpenAI SDK，base_url 配置为 `https://jeniya.cn/v1`，model 为 `gemini-2.5-pro`（可经环境变量覆盖）。
+    基于 OpenAI SDK，base_url 配置为 `https://jeniya.cn/v1`，默认 model 为 `gpt-5.2`（可在配置中覆盖）。
     若调用失败，可在上层启用回退逻辑：走“VLM分析 + DeepSeek决策”老路径。
     """
 

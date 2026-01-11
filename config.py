@@ -159,7 +159,7 @@ API_KEYS = {
     "gemini": {
         'api_key': os.getenv('GEMINI_API_KEY'),
         'base_url': os.getenv('GEMINI_BASE_URL', 'https://jeniya.cn/v1'),
-        'model': os.getenv('GEMINI_MODEL', 'gemini-3-pro-preview'),
+        'model': os.getenv('GEMINI_MODEL', 'gpt-5.2'),
     },
     "twitter": {
         "x-rapidapi-key": os.getenv('TWITTER_RAPIDAPI_KEY'),
