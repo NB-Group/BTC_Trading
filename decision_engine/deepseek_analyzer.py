@@ -5,6 +5,7 @@ from typing import Dict, List, Any, Optional
 from datetime import datetime, timezone
 
 from openai import OpenAI
+from openai import PermissionDeniedError
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 import config
@@ -202,6 +203,22 @@ class DeepSeekAnalyzer:
         except json.JSONDecodeError as e:
             LOGGER.error(f"无法解析LLM返回的JSON: {e}\n响应内容: {message_content}")
             return self._error_response('LLM返回的JSON格式无效')
+        except PermissionDeniedError as e:
+            # 检查是否是余额不足错误（403错误，code 30001）
+            error_str = str(e)
+            error_body = getattr(e, 'body', {}) if hasattr(e, 'body') else {}
+            error_code = error_body.get('code', '') if isinstance(error_body, dict) else ''
+            
+            # 余额不足错误：403状态码，code为30001，或错误信息包含insufficient/balance
+            if (error_code == 30001 or 
+                'insufficient' in error_str.lower() or 
+                'balance' in error_str.lower()):
+                LOGGER.warning("DeepSeek API 余额不足，返回HOLD决策（这是回退选项）")
+                return self._error_response('API余额不足')
+            
+            # 其他权限错误，记录但不重试
+            LOGGER.error(f"DeepSeek API 权限错误: {e}")
+            return self._error_response(f'API权限错误: {error_str[:100]}')
         except Exception as e:
             LOGGER.error(f"DeepSeek API 请求或解析时发生未知错误: {e}")
             # 重新抛出通用异常以允许tenacity重试

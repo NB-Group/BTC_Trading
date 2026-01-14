@@ -600,7 +600,11 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
     except Exception as e:
         import traceback
         error_msg = f"[{symbol}] 交易周期发生严重错误: {repr(e)}"
-        LOGGER.critical(f"{error_msg}\n详细traceback:\n{traceback.format_exc()}", exc_info=True)
+        # 使用 opt(raw=True) 避免格式化问题，或者将 traceback 作为单独参数
+        traceback_str = traceback.format_exc()
+        # 转义花括号以避免格式化错误
+        traceback_str_escaped = traceback_str.replace('{', '{{').replace('}', '}}')
+        LOGGER.opt(raw=True).critical(f"{error_msg}\n详细traceback:\n{traceback_str}\n")
         
         email_notifier.send_error_notification(
             f"系统错误 ({symbol})", 
