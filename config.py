@@ -41,8 +41,15 @@ EMAIL_CONFIG = {
 # ----------------- Defaults -----------------
 DEFAULTS = {
     'proxy_url': os.getenv('PROXY_URL'),  # 代理地址，如果不需要则设为 None
-    # 默认实时信号主模型，改为使用 gpt-5 系列模型（可通过环境变量覆盖）
-    'model_name': os.getenv('DEFAULT_MODEL_NAME', 'gpt-5.1'),
+    # 默认实时信号主模型（可通过环境变量覆盖）
+    'model_name': os.getenv('DEFAULT_MODEL_NAME', 'gemini-3-pro-preview'),
+}
+
+# ----------------- Clash Configuration -----------------
+CLASH_CONFIG = {
+    'api_url': os.getenv('CLASH_API_URL', 'http://127.0.0.1:9090'),  # Clash API地址
+    'secret': os.getenv('CLASH_SECRET'),  # Clash API密钥（如果设置了认证）
+    'enabled': os.getenv('CLASH_ENABLED', 'true').lower() == 'true',  # 是否启用Clash节点切换
 }
 
 # ================= 交易决策规则（可调） =================
@@ -63,6 +70,8 @@ DECISION_RULES = {
     'unified_fallback_enabled': os.getenv('UNIFIED_FALLBACK_ENABLED', 'true').lower() == 'true',
     # 是否启用 gpt-5.1 对 Gemini 决策的二次审核
     'enable_gpt_reviewer': os.getenv('ENABLE_GPT_REVIEWER', 'true').lower() == 'true',
+    # 是否启用量化-only模式（默认开启，可通过环境变量覆盖）
+    'quant_only_mode': os.getenv('QUANT_ONLY_MODE', 'true').lower() == 'true',
 }
 
 # ----------------- 自动更新与热重载 -----------------
@@ -159,7 +168,7 @@ API_KEYS = {
     "gemini": {
         'api_key': os.getenv('GEMINI_API_KEY'),
         'base_url': os.getenv('GEMINI_BASE_URL', 'https://jeniya.cn/v1'),
-        'model': os.getenv('GEMINI_MODEL', 'gpt-5.2'),
+        'model': os.getenv('GEMINI_MODEL', 'gemini-3-pro-preview'),
     },
     "twitter": {
         "x-rapidapi-key": os.getenv('TWITTER_RAPIDAPI_KEY'),
