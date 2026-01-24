@@ -19,7 +19,7 @@ class UnifiedGeminiAnalyzer:
     - 直接输入 1H K线图（图片）+ 量化信号 + 新闻情报 + 持仓与余额
     - 输出与 DeepSeekAnalyzer 相同结构的交易决策 JSON
 
-    基于 OpenAI SDK，base_url 配置为 `https://jeniya.cn/v1`，默认 model 为 `gpt-5.2`（可在配置中覆盖）。
+    基于 OpenAI SDK，base_url 配置为 `https://jeniya.cn/v1`，默认 model 为 `gemini-3-pro-preview`（可在配置中覆盖）。
     若调用失败，可在上层启用回退逻辑：走“VLM分析 + DeepSeek决策”老路径。
     """
 
@@ -27,8 +27,8 @@ class UnifiedGeminiAnalyzer:
         gemini_config = config.API_KEYS.get('gemini', {})
         self.base_url = gemini_config.get('base_url')
         self.api_key = gemini_config.get('api_key')
-        # 默认模型改为 gpt-5.2，可通过环境变量覆盖
-        self.model = gemini_config.get('model', 'gpt-5.2')
+        # 默认模型改为 gemini-3-pro-preview，可通过环境变量覆盖
+        self.model = gemini_config.get('model', 'gemini-3-pro-preview')
 
         if not all([self.base_url, self.api_key, self.model]):
             raise ValueError("Gemini API的配置不完整 (base_url, api_key, model)。")

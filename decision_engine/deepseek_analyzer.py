@@ -10,6 +10,7 @@ from tenacity import retry, stop_after_attempt, wait_exponential
 
 import config
 from btc_predictor.utils import LOGGER
+from decision_engine.clash_client import switch_clash_proxy_on_retry
 
 TRADE_LOG_FILE = 'trade_log.json'
 
@@ -167,9 +168,13 @@ class DeepSeekAnalyzer:
             LOGGER.warning(f"范围预测调用失败: {e}")
             return {"is_range": False, "reason": f"range_forecast_error: {e}"}
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
+    @retry(
+        stop=stop_after_attempt(3), 
+        wait=wait_exponential(multiplier=1, min=4, max=10),
+        before_sleep=switch_clash_proxy_on_retry
+    )
     def _make_api_call(self, prompt: str) -> Dict[str, Any]:
-        """使用tenacity进行带重试的API调用。"""
+        """使用tenacity进行带重试的API调用。在重试前会自动切换Clash节点。"""
         
         # 打印提示词（对Twitter部分进行截断）
         self._print_prompt_preview(prompt)
