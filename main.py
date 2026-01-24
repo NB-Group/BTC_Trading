@@ -1,7 +1,7 @@
 import time
 import json
 import os
-from typing import Dict, Any, List, cast
+from typing import Any, Dict, List, Optional, cast
 import argparse
 from datetime import datetime, timezone
 import schedule
@@ -10,6 +10,11 @@ from tenacity import RetryError
 
 import config
 from btc_predictor.predict import get_live_trade_signal, get_rf4_signal, get_bollinger_breakout_signal, get_ma_crossover_signal
+from btc_predictor.strategies import (
+    calculate_volume_filtered_ema_signal,
+    calculate_volatility_breakout_signal,
+    backtest_volume_filtered_ema,
+)
 from btc_predictor.utils import LOGGER
 from btc_predictor.kline_plot import create_kline_image
 from data_ingestion.news_feeds import fetch_coindesk_news, fetch_truthsocial_news
@@ -21,6 +26,182 @@ from execution_engine.okx_trader import OKXTrader
 from utils.email_notifier import EmailNotifier
 from market_scanner import scan_for_opportunities # 导入市场扫描器
 from utils.autostart import ensure_windows_autostart
+
+
+def _determine_position_side(position: Optional[Dict[str, Any]]) -> str:
+    if not position:
+        return "flat"
+    pos_side = position.get('posSide')
+    if pos_side in ('long', 'short'):
+        return pos_side
+    if pos_side == 'net':
+        try:
+            pos_val = float(position.get('pos', 0) or 0)
+        except Exception:
+            pos_val = 0.0
+        if pos_val > 0:
+            return 'long'
+        if pos_val < 0:
+            return 'short'
+        return 'flat'
+    return 'flat'
+
+
+def _find_quant_only_signal(signals: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    for s in signals:
+        if s.get('strategy') in ('EMA5_20_6H_VolumeFilter', 'VOL_BREAKOUT_4H'):
+            return s
+    return None
+
+
+def _build_quant_only_decision(
+    symbol: str,
+    quant_signal: Optional[Dict[str, Any]],
+    current_position: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    leverage_cfg = float(config.FUTURES.get('leverage', 3))
+    leverage = min(max(leverage_cfg, 2.0), 3.0)
+    trade_params = {
+        "leverage": leverage,
+        "take_profit_pct": None,
+        "stop_loss_pct": None,
+        "stop_logic": "EMA20 死叉止损",
+    }
+    decision = "HOLD"
+    reasoning_lines = []
+    key_signals = []
+    risk_lines = ["仅在EMA金叉出现且无异常放量时入场，死叉立即离场。"]
+
+    if not quant_signal:
+        reasoning_lines.append("未获取到6H EMA量化信号，保持观望。")
+    else:
+        signal = quant_signal.get("signal", "HOLD").upper()
+        action = quant_signal.get("action", "")
+        fast_ema = quant_signal.get("fast_ema")
+        slow_ema = quant_signal.get("slow_ema")
+        volume_spike = quant_signal.get("volume_spike")
+        key_signals.append(
+            f"6H EMA5/EMA20 信号: {signal} | {action} | fast={fast_ema:.2f} slow={slow_ema:.2f}"
+            if isinstance(fast_ema, (int, float)) and isinstance(slow_ema, (int, float))
+            else f"6H EMA5/EMA20 信号: {signal} | {action}"
+        )
+        if volume_spike:
+            key_signals.append("成交量 > rolling mean * 2.5，视为潜在黑天鹅冲击，信号被过滤。")
+            risk_lines.append("异常放量时拒绝追多，避免黑天鹅回杀。")
+
+        pos_side = _determine_position_side(current_position)
+        if signal == "BUY" and not volume_spike:
+            if pos_side == 'long':
+                decision = "HOLD"
+                reasoning_lines.append("已有多单持仓，保持策略一致，等待死叉指令。")
+            else:
+                decision = "LONG"
+                reasoning_lines.append("6H EMA5 上穿 EMA20，且成交量未放大，执行做多。")
+        elif signal == "EXIT":
+            if pos_side == 'long':
+                decision = "CLOSE_LONG"
+                reasoning_lines.append("EMA5 下穿 EMA20，触发死叉止损，立即退出多单。")
+            else:
+                decision = "HOLD"
+                reasoning_lines.append("检测到死叉，但当前无多单，无需操作。")
+        else:
+            decision = "HOLD"
+            if volume_spike and signal == "HOLD":
+                reasoning_lines.append("最新K线放量过大，策略选择观望，等待波动消化。")
+            else:
+                reasoning_lines.append("6H EMA信号未出现有效金叉/死叉，保持观望。")
+
+    reasoning = " ".join(reasoning_lines) if reasoning_lines else "量化only模式：暂无有效指令。"
+    key_signals_text = "；".join(key_signals) if key_signals else "暂无关键信号。"
+    risk_assessment = " ".join(risk_lines)
+
+    return {
+        "decision": decision,
+        "reasoning": reasoning,
+        "key_signals_detected": key_signals_text,
+        "risk_assessment": risk_assessment,
+        "trade_params": trade_params,
+        "suggested_trade_size": 1.0,
+        "symbol": symbol,
+        "decision_mode": "quant-only",
+    }
+
+
+def _build_vol_breakout_decision(
+    symbol: str,
+    vb_signal: Optional[Dict[str, Any]],
+    current_position: Optional[Dict[str, Any]],
+    leverage_override: Optional[float] = None,
+) -> Dict[str, Any]:
+    leverage_cfg = float(config.FUTURES.get('leverage', 3))
+    leverage = leverage_override if leverage_override is not None else min(max(leverage_cfg, 1.0), 5.0)
+    trade_params = {
+        "leverage": leverage,
+        "take_profit_pct": None,
+        "stop_loss_pct": None,
+        "stop_logic": "跌破rolling_low或EMA趋势下破",
+    }
+    decision = "HOLD"
+    reasoning_lines: List[str] = []
+    key_signals: List[str] = []
+    risk_lines = [
+        "放量过滤后才入场；跌破rolling_low或趋势均线时离场。",
+        "ATR缓冲=0.6，止损ATR倍数=1.0（执行侧应用）。",
+    ]
+
+    if not vb_signal:
+        reasoning_lines.append("未获取到波动突破信号，保持观望。")
+    else:
+        signal = vb_signal.get("signal", "HOLD").upper()
+        action = vb_signal.get("action", "")
+        breakout_level = vb_signal.get("breakout_level")
+        atr_val = vb_signal.get("atr")
+        ema_trend = vb_signal.get("ema_trend")
+        volume_spike = vb_signal.get("volume_spike", False)
+        key_signals.append(
+            f"4H 波动突破: {signal} | {action} | breakout={breakout_level} atr={atr_val} ema_trend={ema_trend}"
+        )
+        if volume_spike:
+            key_signals.append("成交量异常放大，信号过滤为观望。")
+            risk_lines.append("异常放量时拒绝追多，等待回落。")
+
+        pos_side = _determine_position_side(current_position)
+        if signal == "BUY" and not volume_spike:
+            if pos_side == 'long':
+                decision = "HOLD"
+                reasoning_lines.append("已有多单，保持持仓，等待反转/止损信号。")
+            else:
+                decision = "LONG"
+                reasoning_lines.append("价格突破rolling_high且站上趋势EMA，无放量，执行做多。")
+        elif signal == "EXIT":
+            if pos_side == 'long':
+                decision = "CLOSE_LONG"
+                reasoning_lines.append("价格跌破rolling_low或趋势转弱，平掉多单。")
+            else:
+                decision = "HOLD"
+                reasoning_lines.append("检测到离场信号，但当前无多单。")
+        else:
+            decision = "HOLD"
+            if volume_spike and signal == "HOLD":
+                reasoning_lines.append("最新K线放量过大，策略选择观望。")
+            else:
+                reasoning_lines.append("暂无有效突破/跌破信号，保持观望。")
+
+    reasoning = " ".join(reasoning_lines) if reasoning_lines else "量化only模式：暂无有效指令。"
+    key_signals_text = "；".join(key_signals) if key_signals else "暂无关键信号。"
+    risk_assessment = " ".join(risk_lines)
+
+    return {
+        "decision": decision,
+        "reasoning": reasoning,
+        "key_signals_detected": key_signals_text,
+        "risk_assessment": risk_assessment,
+        "trade_params": trade_params,
+        "suggested_trade_size": 1.0,
+        "symbol": symbol,
+        "decision_mode": "quant-only",
+        "strategy": "VOL_BREAKOUT_4H",
+    }
 
 def save_decision_report(report: Dict[str, Any]):
     """将决策报告保存到文件。"""
@@ -292,6 +473,28 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                     "strategy": "MA_Crossover"
                 })
 
+            # 4. 获取量化-only 波动率突破信号（4H，最佳参数）
+            quant_only_signal = calculate_volatility_breakout_signal(
+                symbol=ccxt_symbol,
+                timeframe="4h",
+                breakout_window=40,
+                atr_period=14,
+                trend_ema_period=100,
+                volume_window=30,
+                atr_buffer=0.6,
+                volume_spike_multiplier=3.0,
+            )
+            if quant_only_signal:
+                quant_signals.append(quant_only_signal)
+                LOGGER.info(f"[{symbol}] 获取到量化-only 波动突破信号: {quant_only_signal}")
+            else:
+                LOGGER.warning(f"[{symbol}] 无法获取量化-only 波动突破信号。")
+                quant_signals.append({
+                    "signal": "ERROR",
+                    "info": "无法获取量化-only 波动突破信号",
+                    "strategy": "VOL_BREAKOUT_4H"
+                })
+
             # (这个逻辑现在可能永远不会触发，因为上面已经处理了所有失败情况，但保留作为最终的保险)
             if not quant_signals:
                 LOGGER.error(f"[{symbol}] 所有量化策略均未生成有效信号，将使用默认的HOLD信号继续。")
@@ -306,201 +509,227 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             return short_term_data, price_data_for_ma, quant_signals
         short_term_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
 
-        # --- 智能分析门禁 (Smart Analysis Gate) ---
-        # [重要修正] 此门禁仅对非主攻币种生效
-        if not is_primary_symbol:
-            is_all_hold = all(s.get('signal', 'HOLD').upper() == 'HOLD' for s in quant_signal_data)
-            if is_all_hold:
-                LOGGER.info(f"[{symbol}] 所有量化信号均为 'HOLD'，市场无明显交易机会，跳过昂贵的VLM和LLM分析。")
-                print(f"\033[38;5;152m[{symbol}] 所有量化信号均为 'HOLD'，跳过深度分析...\033[0m")
-                # 返回一个表示HOLD的特殊结果
-                return {"decision": "HOLD", "reasoning": "Quant signals all HOLD"}, None
-        else:
-            LOGGER.info(f"[{symbol}] 是主攻币种，将执行完整的VLM和LLM深度分析，无论量化信号如何。")
+        analysis_1h = None
+        market_news: List[Dict[str, Any]] = []
+        current_position: Optional[Dict[str, Any]] = None
+        current_balance: Optional[float] = None
+        final_decision: Optional[Dict[str, Any]] = None
 
-        # ======================================================================
-        # 步骤 2: 根据模式准备图表资源（统一Gemini模式将仅生成图像；传统模式走VLM分析）
-        # ======================================================================
-        use_unified = getattr(config, 'DECISION_RULES', {}).get('use_unified_gemini', False)
-        vlm_analyzer = None
-        kline_image_path_for_unified = None
-        if use_unified:
-            print(f"\033[38;5;152m[{symbol}] 步骤 2: 统一Gemini模式启用，仅生成1h K线图\033[0m")
-            LOGGER.info(f"[{symbol}] 统一Gemini模式启用，仅生成1h K线图（跳过VLM文本分析）")
-        else:
-            print(f"\033[38;5;152m[{symbol}] 步骤 2: 初始化VLM分析器\033[0m")
-            LOGGER.info(f"[{symbol}] 步骤 2: 初始化VLM分析器")
-            vlm_analyzer = VLMAnalyzer()
-            vlm_analyzer.cache.cleanup_expired_cache()
-            cache_stats = vlm_analyzer.cache.get_cache_stats()
-            LOGGER.info(f"[{symbol}] 当前VLM缓存状态 - K线图: {cache_stats.get('kline_cache_count', 0)} 条")
-
-        # ======================================================================
-        # 步骤 3: 生成并（按模式）分析1h K线图
-        # ======================================================================
-        print(f"\033[38;5;152m[{symbol}] 步骤 3: 生成1h K线图{'' if use_unified else '并进行VLM分析'}\033[0m")
-        LOGGER.info(f"[{symbol}] 步骤 3: 生成1h K线图{'' if use_unified else '并进行VLM分析'}")
-
-        import os
-        def save_proxy_env():
-            return {k: os.environ.get(k) for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']}
-        def clear_proxy_env():
-            for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
-                if k in os.environ:
-                    del os.environ[k]
-        def restore_proxy_env(env):
-            for k, v in env.items():
-                if v is not None:
-                    os.environ[k] = v
-                elif k in os.environ:
-                    del os.environ[k]
-
-        _orig_proxy_env = save_proxy_env()
-        clear_proxy_env()
-        try:
-            if use_unified:
-                def generate_image_only():
-                    if price_data_for_ma is None or price_data_for_ma.empty:
-                        return None
-                    result = create_kline_image(price_data_for_ma, timeframe='1h')
-                    if not result:
-                        return None
-                    return result[0]  # image_path
-                kline_image_path_for_unified = track_process('kline_image', generate_image_only)
-                analysis_1h = None  # 统一模式下不生成文本分析
-            else:
-                def perform_vlm_analysis():
-                    analysis_1h_val, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "1H", "1h")
-                    return analysis_1h_val
-                analysis_1h = track_process('vlm_analysis', perform_vlm_analysis)
-        finally:
-            restore_proxy_env(_orig_proxy_env)
-
-        # ======================================================================
-        # 步骤 4: 获取市场新闻情报
-        # ======================================================================
-        print(f"\033[38;5;152m[{symbol}] 步骤 4: 获取市场新闻情报\033[0m")
-        LOGGER.info(f"[{symbol}] 步骤 4: 获取市场新闻情报")
-        market_news = track_process('news_intelligence', get_market_intelligence, symbol=symbol)
-
-        # ======================================================================
-        # 步骤 5: LLM决策引擎（支持统一Gemini路径）
-        # ======================================================================
-        print(f"\033[38;5;152m[{symbol}] 步骤 5: 获取持仓并进行LLM决策\033[0m")
-        LOGGER.info(f"[{symbol}] 步骤 5: 获取持仓并进行LLM决策")
-        
-        current_position = trader.get_position(symbol)
-        try:
-            if current_position:
-                LOGGER.info(f"[{symbol}] 当前持仓快照: posSide={current_position.get('posSide')}, pos={current_position.get('pos')}, avgPx={current_position.get('avgPx')}, upl={current_position.get('upl')}")
-            else:
-                LOGGER.info(f"[{symbol}] 当前无持仓或无法获取持仓信息")
-        except Exception:
-            pass
-        current_balance = trader.get_balance('USDT')
-        
-        if skip_llm:
-            print(f"\033[38;5;180m[{symbol}] 已设置--skip-llm，跳过LLM决策分析。\033[0m")
-            LOGGER.warning(f"[{symbol}] 已设置--skip-llm，跳过LLM决策分析。")
-            final_decision = {
-                "decision": "HOLD",
-                "reasoning": "Skipped LLM analysis",
-                "trade_params": {},
-                "suggested_trade_size": 0.95,
-                "symbol": symbol
-            }
-            process_status['llm_decision'] = {
-                'status': 'info',
+        quant_only_enabled = getattr(config, 'DECISION_RULES', {}).get('quant_only_mode', False)
+        quant_only_triggered = False
+        if quant_only_enabled:
+            LOGGER.info(f"[{symbol}] 量化-only模式开启：使用 4H 波动突破（最佳参数）决策。")
+            quant_signal = _find_quant_only_signal(quant_signal_data)
+            try:
+                current_position = trader.get_position(symbol)
+            except Exception as e:
+                LOGGER.warning(f"[{symbol}] 获取持仓失败（quant-only）: {e}")
+                current_position = None
+            current_balance = trader.get_balance('USDT')
+            final_decision = _build_vol_breakout_decision(symbol, quant_signal, current_position)
+            quant_only_triggered = True
+            process_status['quant_only_mode'] = {
+                'status': 'success',
                 'duration': '0.0s',
-                'message': '跳过LLM分析'
+                'message': '量化-only模式完成决策'
             }
-        else:
-            if use_unified and kline_image_path_for_unified:
-                def perform_unified_decision():
-                    try:
-                        analyzer = UnifiedGeminiAnalyzer()
-                        decision = analyzer.get_trade_decision_unified(
-                            quant_signals=quant_signal_data,
-                            twitter_data=market_news,
-                            kline_image_path=kline_image_path_for_unified,
-                            timeframe='1h',
-                            current_position=current_position,
-                            current_balance=current_balance,
-                            symbol=symbol,
-                        )
-                        decision['symbol'] = symbol
-                        return decision
-                    except Exception as e:
-                        # 优先展开重试错误的“最后一次尝试”的真实异常，便于定位问题
-                        if isinstance(e, RetryError):
-                            try:
-                                last_exc = e.last_attempt.exception()  # type: ignore[attr-defined]
-                            except Exception:
-                                last_exc = None
-                            if last_exc is not None:
-                                # 避免格式化器解析异常消息中的花括号，改用 f-string
-                                LOGGER.error(f"统一Gemini路径失败（最后一次尝试）: {type(last_exc).__name__}: {last_exc}")
-                            else:
-                                LOGGER.error(f"统一Gemini路径失败: {type(e).__name__}: {e}")
-                        else:
-                            LOGGER.error(f"统一Gemini路径失败: {type(e).__name__}: {e}")
-                        if getattr(config, 'DECISION_RULES', {}).get('unified_fallback_enabled', True):
-                            LOGGER.warning("触发回退：改用 VLM + DeepSeek 传统路径。")
-                            ds = DeepSeekAnalyzer()
-                            # 如统一路径失败且之前未跑VLM文本，则提供空分析
-                            decision_fb = ds.get_trade_decision(
+
+        if not quant_only_triggered:
+            # --- 智能分析门禁 (Smart Analysis Gate) ---
+            # [重要修正] 此门禁仅对非主攻币种生效
+            if not is_primary_symbol:
+                is_all_hold = all(s.get('signal', 'HOLD').upper() == 'HOLD' for s in quant_signal_data)
+                if is_all_hold:
+                    LOGGER.info(f"[{symbol}] 所有量化信号均为 'HOLD'，市场无明显交易机会，跳过昂贵的VLM和LLM分析。")
+                    print(f"\033[38;5;152m[{symbol}] 所有量化信号均为 'HOLD'，跳过深度分析...\033[0m")
+                    # 返回一个表示HOLD的特殊结果
+                    return {"decision": "HOLD", "reasoning": "Quant signals all HOLD"}, None
+            else:
+                LOGGER.info(f"[{symbol}] 是主攻币种，将执行完整的VLM和LLM深度分析，无论量化信号如何。")
+
+            # ======================================================================
+            # 步骤 2: 根据模式准备图表资源（统一Gemini模式将仅生成图像；传统模式走VLM分析）
+            # ======================================================================
+            use_unified = getattr(config, 'DECISION_RULES', {}).get('use_unified_gemini', False)
+            vlm_analyzer = None
+            kline_image_path_for_unified = None
+            if use_unified:
+                print(f"\033[38;5;152m[{symbol}] 步骤 2: 统一Gemini模式启用，仅生成1h K线图\033[0m")
+                LOGGER.info(f"[{symbol}] 统一Gemini模式启用，仅生成1h K线图（跳过VLM文本分析）")
+            else:
+                print(f"\033[38;5;152m[{symbol}] 步骤 2: 初始化VLM分析器\033[0m")
+                LOGGER.info(f"[{symbol}] 步骤 2: 初始化VLM分析器")
+                vlm_analyzer = VLMAnalyzer()
+                vlm_analyzer.cache.cleanup_expired_cache()
+                cache_stats = vlm_analyzer.cache.get_cache_stats()
+                LOGGER.info(f"[{symbol}] 当前VLM缓存状态 - K线图: {cache_stats.get('kline_cache_count', 0)} 条")
+
+            # ======================================================================
+            # 步骤 3: 生成并（按模式）分析1h K线图
+            # ======================================================================
+            print(f"\033[38;5;152m[{symbol}] 步骤 3: 生成1h K线图{'' if use_unified else '并进行VLM分析'}\033[0m")
+            LOGGER.info(f"[{symbol}] 步骤 3: 生成1h K线图{'' if use_unified else '并进行VLM分析'}")
+
+            import os
+            def save_proxy_env():
+                return {k: os.environ.get(k) for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']}
+            def clear_proxy_env():
+                for k in ['http_proxy', 'https_proxy', 'HTTP_PROXY', 'HTTPS_PROXY']:
+                    if k in os.environ:
+                        del os.environ[k]
+            def restore_proxy_env(env):
+                for k, v in env.items():
+                    if v is not None:
+                        os.environ[k] = v
+                    elif k in os.environ:
+                        del os.environ[k]
+
+            _orig_proxy_env = save_proxy_env()
+            clear_proxy_env()
+            try:
+                if use_unified:
+                    def generate_image_only():
+                        if price_data_for_ma is None or price_data_for_ma.empty:
+                            return None
+                        result = create_kline_image(price_data_for_ma, timeframe='1h')
+                        if not result:
+                            return None
+                        return result[0]  # image_path
+                    kline_image_path_for_unified = track_process('kline_image', generate_image_only)
+                    analysis_1h = None  # 统一模式下不生成文本分析
+                else:
+                    def perform_vlm_analysis():
+                        analysis_1h_val, _ = _generate_and_analyze_kline(vlm_analyzer, price_data_for_ma, "1H", "1h")
+                        return analysis_1h_val
+                    analysis_1h = track_process('vlm_analysis', perform_vlm_analysis)
+            finally:
+                restore_proxy_env(_orig_proxy_env)
+
+            # ======================================================================
+            # 步骤 4: 获取市场新闻情报
+            # ======================================================================
+            print(f"\033[38;5;152m[{symbol}] 步骤 4: 获取市场新闻情报\033[0m")
+            LOGGER.info(f"[{symbol}] 步骤 4: 获取市场新闻情报")
+            market_news = track_process('news_intelligence', get_market_intelligence, symbol=symbol)
+
+            # ======================================================================
+            # 步骤 5: LLM决策引擎（支持统一Gemini路径）
+            # ======================================================================
+            print(f"\033[38;5;152m[{symbol}] 步骤 5: 获取持仓并进行LLM决策\033[0m")
+            LOGGER.info(f"[{symbol}] 步骤 5: 获取持仓并进行LLM决策")
+            
+            current_position = trader.get_position(symbol)
+            try:
+                if current_position:
+                    LOGGER.info(f"[{symbol}] 当前持仓快照: posSide={current_position.get('posSide')}, pos={current_position.get('pos')}, avgPx={current_position.get('avgPx')}, upl={current_position.get('upl')}")
+                else:
+                    LOGGER.info(f"[{symbol}] 当前无持仓或无法获取持仓信息")
+            except Exception:
+                pass
+            current_balance = trader.get_balance('USDT')
+            
+            if skip_llm:
+                print(f"\033[38;5;180m[{symbol}] 已设置--skip-llm，跳过LLM决策分析。\033[0m")
+                LOGGER.warning(f"[{symbol}] 已设置--skip-llm，跳过LLM决策分析。")
+                final_decision = {
+                    "decision": "HOLD",
+                    "reasoning": "Skipped LLM analysis",
+                    "trade_params": {},
+                    "suggested_trade_size": 0.95,
+                    "symbol": symbol
+                }
+                process_status['llm_decision'] = {
+                    'status': 'info',
+                    'duration': '0.0s',
+                    'message': '跳过LLM分析'
+                }
+            else:
+                if use_unified and kline_image_path_for_unified:
+                    def perform_unified_decision():
+                        try:
+                            analyzer = UnifiedGeminiAnalyzer()
+                            decision = analyzer.get_trade_decision_unified(
                                 quant_signals=quant_signal_data,
                                 twitter_data=market_news,
-                                kline_analysis={"1h": analysis_1h or ""},
+                                kline_image_path=kline_image_path_for_unified,
+                                timeframe='1h',
                                 current_position=current_position,
                                 current_balance=current_balance,
                                 symbol=symbol,
                             )
-                            decision_fb['symbol'] = symbol
-                            return decision_fb
-                        raise
-                _orig_proxy_env_decision = save_proxy_env()
-                clear_proxy_env()
-                try:
-                    final_decision = track_process('llm_decision', perform_unified_decision)
-                finally:
-                    restore_proxy_env(_orig_proxy_env_decision)
-                # gpt-5.1 复核 Gemini 决策
-                if config.DECISION_RULES.get('enable_gpt_reviewer', True):
-                    def perform_reviewer():
-                        reviewer = GPTReviewer()
-                        return reviewer.review(
-                            decision=final_decision,
-                            kline_image_path=kline_image_path_for_unified,
+                            decision['symbol'] = symbol
+                            return decision
+                        except Exception as e:
+                            # 优先展开重试错误的“最后一次尝试”的真实异常，便于定位问题
+                            if isinstance(e, RetryError):
+                                try:
+                                    last_exc = e.last_attempt.exception()  # type: ignore[attr-defined]
+                                except Exception:
+                                    last_exc = None
+                                if last_exc is not None:
+                                    # 避免格式化器解析异常消息中的花括号，改用 f-string
+                                    LOGGER.error(f"统一Gemini路径失败（最后一次尝试）: {type(last_exc).__name__}: {last_exc}")
+                                else:
+                                    LOGGER.error(f"统一Gemini路径失败: {type(e).__name__}: {e}")
+                            else:
+                                LOGGER.error(f"统一Gemini路径失败: {type(e).__name__}: {e}")
+                            if getattr(config, 'DECISION_RULES', {}).get('unified_fallback_enabled', True):
+                                LOGGER.warning("触发回退：改用 VLM + DeepSeek 传统路径。")
+                                ds = DeepSeekAnalyzer()
+                                # 如统一路径失败且之前未跑VLM文本，则提供空分析
+                                decision_fb = ds.get_trade_decision(
+                                    quant_signals=quant_signal_data,
+                                    twitter_data=market_news,
+                                    kline_analysis={"1h": analysis_1h or ""},
+                                    current_position=current_position,
+                                    current_balance=current_balance,
+                                    symbol=symbol,
+                                )
+                                decision_fb['symbol'] = symbol
+                                return decision_fb
+                            raise
+                    _orig_proxy_env_decision = save_proxy_env()
+                    clear_proxy_env()
+                    try:
+                        final_decision = track_process('llm_decision', perform_unified_decision)
+                    finally:
+                        restore_proxy_env(_orig_proxy_env_decision)
+                    # gpt-5.1 复核 Gemini 决策
+                    if config.DECISION_RULES.get('enable_gpt_reviewer', True):
+                        def perform_reviewer():
+                            reviewer = GPTReviewer()
+                            return reviewer.review(
+                                decision=final_decision,
+                                kline_image_path=kline_image_path_for_unified,
+                                quant_signals=quant_signal_data,
+                                twitter_data=market_news,
+                                current_position=current_position,
+                                current_balance=current_balance,
+                            )
+                        try:
+                            review_result = track_process('gpt_review', perform_reviewer)
+                            final_decision['gpt_review'] = review_result
+                        except Exception as e:
+                            LOGGER.warning(f"[{symbol}] gpt-5.1 审核失败: {e}")
+                else:
+                    def perform_llm_decision():
+                        analyzer = DeepSeekAnalyzer()
+                        decision = analyzer.get_trade_decision(
                             quant_signals=quant_signal_data,
                             twitter_data=market_news,
+                            kline_analysis={"1h": analysis_1h},
                             current_position=current_position,
                             current_balance=current_balance,
+                            symbol=symbol
                         )
+                        decision['symbol'] = symbol
+                        return decision
+                    _orig_proxy_env_decision = save_proxy_env()
+                    clear_proxy_env()
                     try:
-                        review_result = track_process('gpt_review', perform_reviewer)
-                        final_decision['gpt_review'] = review_result
-                    except Exception as e:
-                        LOGGER.warning(f"[{symbol}] gpt-5.1 审核失败: {e}")
-            else:
-                def perform_llm_decision():
-                    analyzer = DeepSeekAnalyzer()
-                    decision = analyzer.get_trade_decision(
-                        quant_signals=quant_signal_data,
-                        twitter_data=market_news,
-                        kline_analysis={"1h": analysis_1h},
-                        current_position=current_position,
-                        current_balance=current_balance,
-                        symbol=symbol
-                    )
-                    decision['symbol'] = symbol
-                    return decision
-                _orig_proxy_env_decision = save_proxy_env()
-                clear_proxy_env()
-                try:
-                    final_decision = track_process('llm_decision', perform_llm_decision)
-                finally:
-                    restore_proxy_env(_orig_proxy_env_decision)
+                        final_decision = track_process('llm_decision', perform_llm_decision)
+                    finally:
+                        restore_proxy_env(_orig_proxy_env_decision)
 
         # ======================================================================
         # 步骤 6: 保存并打印决策报告

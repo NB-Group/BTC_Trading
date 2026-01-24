@@ -8,10 +8,10 @@ from .model import BTCPriceTransformer
 DATA_CONFIG = {
     'symbol': 'BTC/USDT',
     'timeframe': '1h',
-    'exchange': 'binance',
+    'exchange': 'okx',  # 默认数据源改为 OKX
     'since': '2020-01-01T00:00:00Z', # 从2020年开始获取数据
     'limit': 100000, # 设置一个较高的上限以确保获取'since'之后的所有数据
-    'cache_path': 'cache/binance_ohlcv_{symbol}_{timeframe}.pkl'
+    'cache_path': 'cache/okx_ohlcv_{symbol}_{timeframe}.pkl'
 }
 
 
