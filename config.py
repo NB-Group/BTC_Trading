@@ -70,8 +70,8 @@ DECISION_RULES = {
     'unified_fallback_enabled': os.getenv('UNIFIED_FALLBACK_ENABLED', 'true').lower() == 'true',
     # 是否启用 gpt-5.1 对 Gemini 决策的二次审核
     'enable_gpt_reviewer': os.getenv('ENABLE_GPT_REVIEWER', 'true').lower() == 'true',
-    # 是否启用量化-only模式（默认开启，可通过环境变量覆盖）
-    'quant_only_mode': os.getenv('QUANT_ONLY_MODE', 'true').lower() == 'true',
+    # 是否启用量化-only模式（默认关闭，可通过环境变量覆盖）
+    'quant_only_mode': os.getenv('QUANT_ONLY_MODE', 'false').lower() == 'true',
 }
 
 # ----------------- 自动更新与热重载 -----------------
