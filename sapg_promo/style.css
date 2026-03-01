@@ -1,0 +1,210 @@
+:root {
+    --bg-color: #141617;
+    --text-primary: #f2f0ea;
+    --text-secondary: #a8a29d;
+    --accent: #8ea4b0;
+    --accent-glow: rgba(142, 164, 176, 0.18);
+    --ui-bg: rgba(20, 22, 23, 0.75);
+    --font-en: 'Inter', sans-serif;
+    --font-cn: 'Noto Sans SC', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    font-family: var(--font-en);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    max-width: 1920px;
+    max-height: 1080px;
+    background:
+        radial-gradient(1200px 750px at 35% 35%, rgba(142, 164, 176, 0.18) 0%, rgba(142, 164, 176, 0.00) 58%),
+        radial-gradient(1000px 700px at 70% 75%, rgba(168, 150, 145, 0.12) 0%, rgba(168, 150, 145, 0.00) 62%),
+        linear-gradient(180deg, #141617 0%, #101213 55%, #0c0d0f 100%);
+    box-shadow: 0 0 100px rgba(0,0,0,0.5);
+}
+
+#stage {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* UI Layer */
+#ui-layer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 1rem;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    transition: opacity 0.5s ease;
+}
+
+/* Subtitles */
+#subtitle-container {
+    text-align: center;
+    margin-bottom: 0.5rem;
+    background: var(--ui-bg);
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.1);
+    min-width: 400px;
+    pointer-events: none;
+}
+
+.subtitle-text {
+    transition: all 0.3s ease;
+}
+
+.subtitle-text.en {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.subtitle-text.cn {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-family: var(--font-cn);
+    font-weight: 300;
+}
+
+/* Progress Bar */
+#timeline-container {
+    width: 60%;
+    height: 4px;
+    border-radius: 2px;
+    position: relative;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: height 0.2s ease, opacity 0.5s ease;
+    opacity: 0;
+}
+
+#ui-layer:hover #timeline-container {
+    opacity: 0.8;
+}
+
+#progress-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+}
+
+#timeline-container:hover {
+    height: 8px;
+    opacity: 1;
+}
+
+#progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    border-radius: 2px;
+    box-shadow: 0 0 10px var(--accent-glow);
+    transition: width 0.1s linear;
+}
+
+/* SVG Elements Styling */
+text {
+    font-family: var(--font-en);
+    user-select: none;
+}
+
+.title-text {
+    font-weight: 800;
+    fill: var(--text-primary);
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+
+.highlight-char {
+    fill: var(--accent);
+    filter: url(#glow);
+}
+
+.token-rect {
+    fill: rgba(28, 30, 31, 0.85);
+    stroke: var(--text-secondary);
+    stroke-width: 1;
+    rx: 4;
+}
+
+.token-text {
+    font-family: var(--font-mono);
+    font-size: 14px;
+    fill: var(--text-primary);
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+
+.block-rect {
+    fill: rgba(142, 164, 176, 0.10);
+    stroke: var(--accent);
+    stroke-width: 2;
+    rx: 6;
+    filter: none;
+}
+
+.connector-line {
+    stroke: var(--text-secondary);
+    stroke-width: 2;
+    fill: none;
+    marker-end: url(#arrowhead);
+}
+
+.connector-line.active {
+    opacity: 1;
+}
+
+.connector-line.highlight {
+    stroke: var(--accent);
+    marker-end: url(#arrowhead-highlight);
+    filter: none;
+}
+
+.label-annotation {
+    font-family: var(--font-cn);
+    font-size: 1rem;
+    fill: var(--text-secondary);
+    text-anchor: middle;
+}
+
+/* Animations classes (helper) */
+.fade-in {
+    opacity: 1;
+    transition: opacity 0.5s ease;
+}
+
+.fade-out {
+    opacity: 0;
+    transition: opacity 0.5s ease;
+}

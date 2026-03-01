@@ -1,0 +1,30 @@
+<svg width="1024" height="640" viewBox="0 0 1024 640" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1024" height="640" fill="#121212"/>
+  
+  <rect width="1024" height="40" fill="#000000"/>
+  <circle cx="25" cy="20" r="8" fill="#F2A900"/>
+  <text x="40" y="25" fill="white" font-family="Arial, sans-serif" font-size="14" font-weight="bold">CoinDesk</text>
+  <text x="160" y="25" fill="#AAAAAA" font-family="sans-serif" font-size="12">新闻  视频  价格  研究  Consensus 2026</text>
+  
+  <rect y="40" width="1024" height="30" fill="#0A0A0A"/>
+  <text x="10" y="60" fill="#4ADE80" font-family="monospace" font-size="10">▲ 10.10%   BNB $660.00 ▲ 6.44%   XRP $1.4775 ▲ 15.16%</text>
+  
+  <rect y="70" width="1024" height="80" fill="#C3164A"/>
+  <text x="60" y="105" fill="white" font-family="serif" font-size="22">共识香港</text>
+  <text x="60" y="130" fill="white" font-family="sans-serif" font-size="14">在 2 月 6 日前 unwrap Lunar New Year Savings</text>
+  
+  <rect x="570" y="85" width="45" height="50" rx="4" fill="#1A1A1A"/>
+  <text x="592" y="110" fill="white" text-anchor="middle" font-size="20">00</text>
+  <rect x="625" y="85" width="45" height="50" rx="4" fill="#1A1A1A"/>
+  <text x="647" y="110" fill="white" text-anchor="middle" font-size="20">00</text>
+  
+  <text x="150" y="230" fill="white" font-family="sans-serif" font-size="32" font-weight="bold">最新加密货币新闻</text>
+  
+  <text x="150" y="340" fill="#AAAAAA" font-size="12">CRYPTO DAYBOOK 美洲</text>
+  <text x="150" y="375" fill="white" font-size="20" font-weight="bold">比特币复苏仍面临宏观风险</text>
+  <text x="150" y="405" fill="#888888" font-size="12">2026年2月6日前瞻</text>
+  <rect x="640" y="330" width="220" height="130" rx="8" fill="#1F2937"/> <text x="150" y="520" fill="#AAAAAA" font-size="12">市场</text>
+  <text x="150" y="555" fill="white" font-size="18" font-weight="bold">ARK在加密货币暴跌期间抛售了1700万美元的Coinbase股票</text>
+  <text x="150" y="585" fill="#888888" font-size="12">COIN 今天下跌 13.34%，收于 146.12 美元...</text>
+  <rect x="640" y="520" width="220" height="130" rx="8" fill="#1F2937"/> <path d="M970 85L980 95M980 85L970 95" stroke="white" stroke-width="1.5"/>
+</svg>

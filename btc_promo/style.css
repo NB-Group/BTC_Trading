@@ -1,0 +1,225 @@
+:root {
+    /* Morandi Color Palette (Dark Theme) - Updated */
+    --bg-color: #0B1220;         /* Deep Navy */
+    --text-primary: #E6E8EF;     /* Cool Off-White */
+    --text-secondary: #9AA3B2;   /* Slate */
+    
+    --accent: #C8A96A;           /* Champagne Gold */
+    --accent-glow: rgba(200, 169, 106, 0.22);
+    
+    --candle-up: #8FBC8F;        /* Morandi Green (Bullish) - Kept as is */
+    --candle-down: #BC8F8F;      /* Morandi Red (Bearish) - Kept as is */
+    
+    --line-color: #8D95A3;       /* Muted Slate */
+    
+    --ui-bg: rgba(9, 14, 25, 0.78);
+    
+    --font-en: 'Inter', sans-serif;
+    --font-cn: 'Noto Sans SC', sans-serif;
+    --font-mono: 'JetBrains Mono', monospace;
+}
+
+* {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    font-family: var(--font-en);
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+#app {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    max-width: 1920px;
+    max-height: 1080px;
+    background:
+        radial-gradient(1200px 750px at 35% 35%, rgba(200, 169, 106, 0.08) 0%, rgba(200, 169, 106, 0.00) 58%),
+        radial-gradient(1000px 700px at 70% 75%, rgba(106, 166, 255, 0.05) 0%, rgba(106, 166, 255, 0.00) 62%),
+        linear-gradient(180deg, #0B1220 0%, #070D18 55%, #040911 100%);
+    box-shadow: 0 0 100px rgba(0,0,0,0.5);
+}
+
+#stage {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+/* UI Layer */
+#ui-layer {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    padding: 1rem;
+    pointer-events: auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 1rem;
+    transition: opacity 0.5s ease;
+}
+
+/* Subtitles */
+#subtitle-container {
+    text-align: center;
+    margin-bottom: 0.5rem;
+    background: var(--ui-bg);
+    padding: 1rem 2rem;
+    border-radius: 8px;
+    backdrop-filter: blur(8px);
+    border: 1px solid rgba(255,255,255,0.05);
+    min-width: 400px;
+    pointer-events: none;
+}
+
+.subtitle-text {
+    transition: all 0.3s ease;
+}
+
+.subtitle-text.en {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.25rem;
+}
+
+.subtitle-text.cn {
+    font-size: 1.1rem;
+    color: var(--text-secondary);
+    font-family: var(--font-cn);
+    font-weight: 300;
+}
+
+/* Progress Bar */
+#timeline-container {
+    width: 60%;
+    height: 4px;
+    border-radius: 2px;
+    position: relative;
+    pointer-events: auto;
+    cursor: pointer;
+    transition: height 0.2s ease, opacity 0.5s ease;
+    opacity: 0; /* Hidden by default */
+}
+
+#ui-layer:hover #timeline-container {
+    opacity: 0.8;
+}
+
+#progress-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(255,255,255,0.1);
+    border-radius: 2px;
+}
+
+#timeline-container:hover {
+    height: 8px;
+    opacity: 1;
+}
+
+#progress-fill {
+    height: 100%;
+    background: var(--accent);
+    width: 0%;
+    border-radius: 2px;
+    box-shadow: 0 0 10px var(--accent-glow);
+    transition: width 0.1s linear;
+}
+
+.timeline-marker {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    width: 2px;
+    background: rgba(255,255,255,0.2);
+    pointer-events: none;
+}
+
+.timeline-marker::after {
+    content: attr(data-label);
+    position: absolute;
+    bottom: 100%;
+    left: 50%;
+    transform: translateX(-50%);
+    background: rgba(0,0,0,0.6);
+    color: var(--text-primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s;
+    pointer-events: none;
+    margin-bottom: 5px;
+}
+
+#timeline-container:hover .timeline-marker::after {
+    opacity: 1;
+}
+
+/* SVG Elements Styling */
+text {
+    font-family: var(--font-en);
+    user-select: none;
+}
+
+.title-text {
+    font-weight: 800;
+    fill: var(--text-primary);
+    text-anchor: middle;
+    dominant-baseline: middle;
+}
+
+.highlight-char {
+    fill: var(--accent);
+    filter: url(#glow);
+}
+
+.connector-line {
+    stroke: var(--text-secondary);
+    stroke-width: 2;
+    fill: none;
+    marker-end: url(#arrowhead);
+}
+
+.connector-line.highlight {
+    stroke: var(--accent);
+    marker-end: url(#arrowhead-highlight);
+    filter: none;
+}
+
+.label-annotation {
+    font-family: var(--font-cn);
+    font-size: 1rem;
+    fill: var(--text-secondary);
+    text-anchor: middle;
+}
+
+/* K-Line Specifics */
+.candle-up {
+    fill: var(--candle-up);
+    stroke: var(--candle-up);
+}
+.candle-down {
+    fill: var(--candle-down);
+    stroke: var(--candle-down);
+}
+.wick {
+    stroke-width: 2;
+}

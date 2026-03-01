@@ -222,13 +222,16 @@ class UnifiedGeminiAnalyzer:
 
         prompt = f"""
 # 角色
-你是一名顶级的加密货币**期货**短线交易策略师，当前策略为单一 **1小时 (1H)** 时间框的快进快出操作。你必须结合图像与文本做出可执行决策。你正在为 **{asset_name}** 做决策。
+你是一名顶级的加密货币**期货**交易策略师。你必须结合图像与文本做出可执行决策。你正在为 **{asset_name}** 做决策。
 
 - **当前时间(UTC)**: {current_time_utc}
 - **市场价格**: {market_price_text}
 
 # 输入
-（1）一张 1H K线图（在本消息中作为图片内容附带）。
+（1）多张K线图（在本消息中作为图片内容附带）：
+    - **周线 1W**（定大势/关键支撑阻力）
+    - **日线 1D**（定结构/趋势强弱）
+    - **小时线 1H**（定入场与止损/止盈的精确位置）
 （2）以下结构化信息：
 {position_text}
 {balance_text}
@@ -239,13 +242,26 @@ class UnifiedGeminiAnalyzer:
 
 # 分析与约束
 0. **市场形态判定（强制）**：在给出任何交易建议前，先判断当前市场是 **趋势（TREND）** 还是 **震荡/区间（RANGE）**。若判断为 `RANGE`（震荡），**优先采用区间反转策略（在支撑/阻力附近做反转）而不是突破策略**；若判断为 `TREND`，以顺势突破/追随趋势为主。请在输出 JSON 中返回 `market_regime` 字段（取值：\"TREND\" 或 \"RANGE\"），并在 `reasoning` 中明确说明判定依据与位置（支撑/阻力/均线）。
-1. 仅基于 1H 结构与动量把握 1-6 小时机会；证据不足或冲突→`HOLD`。
-2. **资金优先 (硬性要求)**：若开仓（LONG/SHORT），计算满足交易所**最小开仓名义价值**所需最低杠杆：
+1. **多周期框架（强制）**：
+   - 先用 **1W/1D** 给出大方向（趋势/震荡、关键位、是否接近周/日级别支撑）。
+   - 再用 **1H** 给出执行（入场条件、止损/止盈、是否等待确认）。
+   - 若 1W/1D 明显逆势或结构不支持，则 1H 的短线信号应降低权重（更多 `HOLD` / 等确认）。
+2. **长尾 Pin Bar（Nial Fuller 风格）仅用于趋势/结构判断（重点关注，但不是唯一策略）**：
+   - 该形态用于帮助你判断“是否在关键位发生拒绝/反转/趋势延续”，**不能**作为唯一依据强行开仓。
+   - 请在 **1W、1D、1H** 上寻找并判断是否出现以下“长尾 pin bar（看涨反转）”形态，并说明出现在哪些周期/哪一根K线上：
+     - **尾巴显著突出**：下影线明显很长，参考标准：下影线 \>= 实体的 2 倍，或下影线占整根K线长度的 50% 以上；并且相对周边烛台更夸张。
+     - **收盘强势收回**：收盘价靠近K线高点区域（例如收盘位于整根K线高度的上 1/3）。
+     - **实体不应过小**：不是纯十字星，而是能看到比较明确的阳线实体（口述强调“阳线实体稍长”）。
+     - **汇合点（Confluence）加分**：趋势/关键价位/信号强度 三者至少满足 2 项时，形态更可靠。
+     - **事件区域（Event Area）概念**：若 1W/1D 出现高质量长尾 pin bar，请把该 pin bar 的关键区域（例如实体区/50%附近/关键位附近）视为未来可回踩的“事件区域”，可能存在第二次入场机会。
+   - 输出要求：你需要逐条说明为何符合/不符合，并说明它对 1W/1D 趋势判断、以及 1H 执行权重的影响。
+3. **短线执行窗口**：仅基于 1H 结构与动量把握 1-6 小时机会；证据不足或冲突→`HOLD`。
+4. **资金优先 (硬性要求)**：若开仓（LONG/SHORT），计算满足交易所**最小开仓名义价值**所需最低杠杆：
    所需杠杆 = (最小开仓名义价值) / (当前可用保证金 * 0.95)。向上取整；若 >5 则改为 `HOLD` 并在 reasoning 标注原因。否则，设定最终杠杆 = max(向上取整后的所需杠杆, {default_leverage})，写入 trade_params。
    注意：这里使用的是"可用保证金"（availEq），不是"账户总资产"。可用保证金为0时无法开新仓。
-3. **仓位规模**：默认使用 **100% 可用资金**（即 suggested_trade_size = 1.0）进行开仓，除非风险评估明确要求减仓；任何减仓需在 reasoning 中说明原因。
+5. **仓位规模**：默认使用 **100% 可用资金**（即 suggested_trade_size = 1.0）进行开仓，除非风险评估明确要求减仓；任何减仓需在 reasoning 中说明原因。
 
-4. **盈利锁定与动能衰竭（最高优先级硬规则）**：
+6. **盈利锁定与动能衰竭（最高优先级硬规则）**：
    - 该规则只用于“已有持仓”的**离场/减仓**决策，优先级高于任何“等待突破/等待确认/再观察一根K线”的续持逻辑。
    - **严禁**在触发动能衰竭后输出“等待下一次突破/破位确认”。
    - 若当前持有 **多单（LONG）且处于浮盈**：一旦你判断“上涨动能已明显衰竭/冲高受阻”，必须直接输出 `decision = CLOSE_LONG`（或至少在 reasoning 中说明应立即减仓锁盈，但默认应 CLOSE_LONG）。
@@ -263,7 +279,8 @@ class UnifiedGeminiAnalyzer:
         self,
         quant_signals: List[Dict[str, Any]],
         twitter_data: List[Dict[str, Any]],
-        kline_image_path: str,
+        kline_image_path: Optional[str] = None,
+        kline_image_paths: Optional[Dict[str, str]] = None,
         timeframe: str = '1h',
         current_position: Optional[Dict[str, Any]] = None,
         current_balance: Optional[float] = None,
@@ -324,8 +341,25 @@ class UnifiedGeminiAnalyzer:
 
         # 2. 构建用户提示
         user_prompt = self._build_prompt(quant_signals, twitter_data, current_position, current_balance, symbol)
-        img_b64, mime = self._encode_image(kline_image_path)
-        img_url = f"data:{mime};base64,{img_b64}"
+
+        resolved_paths: Dict[str, str] = {}
+        if kline_image_paths:
+            resolved_paths.update({str(k).lower(): v for k, v in kline_image_paths.items() if v})
+        if kline_image_path:
+            resolved_paths.setdefault('1h', kline_image_path)
+
+        if not resolved_paths:
+            raise ValueError("未提供任何K线图路径（kline_image_path 或 kline_image_paths）。")
+
+        ordered_keys = ['1w', '1d', '1h']
+        msg_content: List[Dict[str, Any]] = [{"type": "text", "text": user_prompt}]
+        for tf in ordered_keys:
+            if tf not in resolved_paths:
+                continue
+            img_b64, mime = self._encode_image(resolved_paths[tf])
+            img_url = f"data:{mime};base64,{img_b64}"
+            msg_content.append({"type": "text", "text": f"\n\n### K线图：{tf.upper()}\n"})
+            msg_content.append({"type": "image_url", "image_url": {"url": img_url, "detail": "high"}})
 
         # 目前上游 Gemini 端对该模型的最大 completion tokens 约为 128k，
         # 这里设置一个足够大的安全上限（如 8000），避免出现 invalid_value 错误。
@@ -338,10 +372,7 @@ class UnifiedGeminiAnalyzer:
                 },
                 {
                     "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_prompt},
-                        {"type": "image_url", "image_url": {"url": img_url, "detail": "high"}},
-                    ],
+                    "content": msg_content,
                 }
             ],
             temperature=0.4,

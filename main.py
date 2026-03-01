@@ -404,6 +404,10 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             limit_5_days_hourly = 5 * 24
             short_term_data = get_data(symbol=ccxt_symbol, timeframe='1h', limit=limit_5_days_hourly)
 
+            # 获取日线与周线用于趋势/结构判断（仅用于图像输入与上层分析）
+            daily_data = get_data(symbol=ccxt_symbol, timeframe='1d', limit=180)
+            weekly_data = get_data(symbol=ccxt_symbol, timeframe='1w', limit=260)
+
             price_data_for_ma = short_term_data.tail(limit_5_days_hourly) if short_term_data is not None and not short_term_data.empty else None
 
             # --- 获取多个量化策略信号 ---
@@ -506,8 +510,8 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                 }
                 quant_signals.append(default_signal)
 
-            return short_term_data, price_data_for_ma, quant_signals
-        short_term_data, price_data_for_ma, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
+            return short_term_data, price_data_for_ma, daily_data, weekly_data, quant_signals
+        short_term_data, price_data_for_ma, daily_data, weekly_data, quant_signal_data = track_process('data_collection', collect_data, current_symbol=symbol)
 
         analysis_1h = None
         market_news: List[Dict[str, Any]] = []
@@ -553,6 +557,7 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             use_unified = getattr(config, 'DECISION_RULES', {}).get('use_unified_gemini', False)
             vlm_analyzer = None
             kline_image_path_for_unified = None
+            kline_image_paths_for_unified = None
             if use_unified:
                 print(f"\033[38;5;152m[{symbol}] 步骤 2: 统一Gemini模式启用，仅生成1h K线图\033[0m")
                 LOGGER.info(f"[{symbol}] 统一Gemini模式启用，仅生成1h K线图（跳过VLM文本分析）")
@@ -588,14 +593,23 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
             clear_proxy_env()
             try:
                 if use_unified:
-                    def generate_image_only():
-                        if price_data_for_ma is None or price_data_for_ma.empty:
-                            return None
-                        result = create_kline_image(price_data_for_ma, timeframe='1h')
-                        if not result:
-                            return None
-                        return result[0]  # image_path
-                    kline_image_path_for_unified = track_process('kline_image', generate_image_only)
+                    def generate_images_only():
+                        paths = {}
+                        if weekly_data is not None and not weekly_data.empty:
+                            result_w = create_kline_image(weekly_data, timeframe='1w')
+                            if result_w:
+                                paths['1w'] = result_w[0]
+                        if daily_data is not None and not daily_data.empty:
+                            result_d = create_kline_image(daily_data, timeframe='1d')
+                            if result_d:
+                                paths['1d'] = result_d[0]
+                        if price_data_for_ma is not None and not price_data_for_ma.empty:
+                            result_h = create_kline_image(price_data_for_ma, timeframe='1h')
+                            if result_h:
+                                paths['1h'] = result_h[0]
+                        return paths or None
+                    kline_image_paths_for_unified = track_process('kline_image', generate_images_only)
+                    kline_image_path_for_unified = (kline_image_paths_for_unified or {}).get('1h')
                     analysis_1h = None  # 统一模式下不生成文本分析
                 else:
                     def perform_vlm_analysis():
@@ -652,6 +666,7 @@ def analyze_and_trade_symbol(symbol: str, trader: OKXTrader, email_notifier: Ema
                                 quant_signals=quant_signal_data,
                                 twitter_data=market_news,
                                 kline_image_path=kline_image_path_for_unified,
+                                kline_image_paths=kline_image_paths_for_unified,
                                 timeframe='1h',
                                 current_position=current_position,
                                 current_balance=current_balance,
